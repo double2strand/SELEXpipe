@@ -4,9 +4,11 @@
 # For each sample:
 #   1. fastp: quality/adapter trim + merge paired-end reads (per lane)
 #   2. concatenate lane-merged FASTQ.gz files
-#   3. decompress and convert FASTQ -> FASTA (seqtk)
-#   4. normalize FASTA to a user-specified fixed length (filter_by_length.py)
-#   5. trim retained reads to fixed-length k-mers (default 40-mers)
+#   3. decompress (keep .fq.gz) and convert FASTQ -> FASTA (seqtk)
+#   4. filter FASTA to exact merged-read length (drop shorts; no padding)
+#   5. extract one fixed-width window per molecule (default 40-mer)
+#
+# Default path never writes random ATCG. Padding is opt-in (--allow-pad + --seed).
 #
 # Expected per-sample lane inputs (under --input-dir):
 #   ${SAMPLE}_L1_R1.fastq.gz  ${SAMPLE}_L1_R2.fastq.gz
@@ -19,11 +21,12 @@
 #   ${SAMPLE}_${TARGET_LEN}.fa
 #   ${SAMPLE}_${TARGET_LEN}.seq
 #
-# Ligand design expected lengths:
+# Ligand design expected merged lengths (do not "correct"):
 #   lig147  101 bp
 #   lig200  154 bp
 #   ligN40  187 bp
 #   ligN70  247 bp
+# ligN40 vs ligN70 constant flanks differ; the 60 bp delta is expected.
 
 set -euo pipefail
 
@@ -39,8 +42,10 @@ MIN_INPUT_LEN=""
 MAX_INPUT_LEN=""
 TRIM_FROM="right"
 SEED=""
+ALLOW_PAD=0
 KMER_SIZE=40
-KMER_SEED=""
+KMER_START=0
+CENTER_KMER=0
 THREADS="$(nproc 2>/dev/null || echo 4)"
 SKIP_FASTP=0
 
@@ -63,16 +68,18 @@ Usage: run_preprocess.sh --sample SAMPLE --adapter-fasta ADAPTERS.fa \
 Required:
   --sample NAME              Sample prefix (generic; replaces experiment-specific IDs)
   --adapter-fasta PATH       Adapter FASTA for fastp (e.g. Adapters_TruSeq3PE.fa)
-  --target-length N          Fixed length for filter_by_length.py normalization
+  --target-length N          Exact merged-read length for filter_by_length.py
   --ligand DESIGN            Ligand design key (sets target length; see table below)
 
   Provide exactly one of --target-length or --ligand.
 
-Ligand design expected lengths:
+Ligand design expected merged lengths (do not "correct"):
   lig147  101 bp
   lig200  154 bp
   ligN40  187 bp
   ligN70  247 bp
+
+  ligN40 vs ligN70 constant flanks differ; the 60 bp (not 30 bp) delta is expected.
 
 Optional:
   --input-dir DIR            Directory containing lane FASTQ.gz files (default: .)
@@ -80,12 +87,16 @@ Optional:
   --min-input-len N          Min input length to retain (default: same as target length)
   --max-input-len N          Max input length to retain (default: same as target length)
   --trim-from MODE           right|left|center trim for long reads (default: right)
-  --seed N                   Random seed for filter_by_length.py padding
-  --kmer-size K              SEQ line / k-mer length for trim_to_kmer.py (default: 40)
-  --kmer-seed N              Random seed for trim_to_kmer.py short-chunk padding
+  --kmer-size K              One SEQ line / k-mer per molecule (default: 40)
+  --kmer-start S             0-based start of the extract window (default: 0)
+  --center-kmer              Center the extract window instead of --kmer-start
+  --allow-pad                Opt-in: pad short reads/windows with random ATCG
+  --seed N                   RNG seed (required if --allow-pad is set)
   --threads N                Threads hint for fastp (default: nproc)
   --skip-fastp               Resume from existing lane-merged FASTQ.gz outputs
   -h, --help                 Show this help
+
+Default path: exact-length filter, one window per read, drop shorts, no padding.
 
 Example:
   ./run_preprocess.sh \
@@ -122,10 +133,15 @@ while [[ $# -gt 0 ]]; do
     --max-input-len) MAX_INPUT_LEN="${2:-}"; shift 2 ;;
     --trim-from) TRIM_FROM="${2:-}"; shift 2 ;;
     --seed) SEED="${2:-}"; shift 2 ;;
+    --allow-pad) ALLOW_PAD=1; shift ;;
     --kmer-size) KMER_SIZE="${2:-}"; shift 2 ;;
-    --kmer-seed) KMER_SEED="${2:-}"; shift 2 ;;
+    --kmer-start) KMER_START="${2:-}"; shift 2 ;;
+    --center-kmer) CENTER_KMER=1; shift ;;
     --threads) THREADS="${2:-}"; shift 2 ;;
     --skip-fastp) SKIP_FASTP=1; shift ;;
+    --kmer-seed)
+      die "--kmer-seed is removed. Default extract does not pad; use --allow-pad --seed"
+      ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -150,6 +166,10 @@ case "$TRIM_FROM" in
   right|left|center) ;;
   *) die "--trim-from must be one of: right, left, center" ;;
 esac
+
+if [[ "$ALLOW_PAD" -eq 1 && -z "$SEED" ]]; then
+  die "--allow-pad requires --seed so padding is reproducible"
+fi
 
 require_cmd fastp
 require_cmd gzip
@@ -212,16 +232,17 @@ fi
 log "concatenating lane-merged FASTQ.gz -> $(basename "$COMBINED_GZ")"
 cat "$L1_MERGED" "$L2_MERGED" > "$COMBINED_GZ"
 
-log "decompressing -> $(basename "$COMBINED_FQ")"
+# Keep the gzipped combined file; write an uncompressed copy for seqtk.
+log "decompressing (keep .fq.gz) -> $(basename "$COMBINED_FQ")"
 gzip -d -f -c "$COMBINED_GZ" > "$COMBINED_FQ"
 
 log "FASTQ -> FASTA (seqtk) -> $(basename "$FASTA")"
 seqtk seq -a "$COMBINED_FQ" > "$FASTA"
 
 if [[ -n "$LIGAND" ]]; then
-  log "normalizing FASTA for ligand ${LIGAND} -> length ${TARGET_LEN} (filter_by_length.py)"
+  log "filtering FASTA for ligand ${LIGAND} -> exact length ${TARGET_LEN} (filter_by_length.py)"
 else
-  log "normalizing FASTA to length ${TARGET_LEN} (filter_by_length.py)"
+  log "filtering FASTA to exact length ${TARGET_LEN} (filter_by_length.py)"
 fi
 FILTER_ARGS=(
   "$FASTA"
@@ -235,17 +256,30 @@ else
 fi
 [[ -n "$MIN_INPUT_LEN" ]] && FILTER_ARGS+=(--min_input_len "$MIN_INPUT_LEN")
 [[ -n "$MAX_INPUT_LEN" ]] && FILTER_ARGS+=(--max_input_len "$MAX_INPUT_LEN")
-[[ -n "$SEED" ]] && FILTER_ARGS+=(--seed "$SEED")
+if [[ "$ALLOW_PAD" -eq 1 ]]; then
+  FILTER_ARGS+=(--allow-pad --seed "$SEED")
+fi
 python3 "${SCRIPT_DIR}/filter_by_length.py" "${FILTER_ARGS[@]}"
 
-log "writing ${KMER_SIZE}-base SEQ lines -> $(basename "$KMER_OUT")"
-TRIM_ARGS=("$FASTA_FILTERED" "$KMER_OUT" --length "$KMER_SIZE")
-[[ -n "$KMER_SEED" ]] && TRIM_ARGS+=(--seed "$KMER_SEED")
+if [[ "$CENTER_KMER" -eq 1 ]]; then
+  log "extracting one centered ${KMER_SIZE}-mer per read -> $(basename "$KMER_OUT")"
+else
+  log "extracting one ${KMER_SIZE}-mer per read (start=${KMER_START}) -> $(basename "$KMER_OUT")"
+fi
+TRIM_ARGS=("$FASTA_FILTERED" "$KMER_OUT" --kmer-size "$KMER_SIZE")
+if [[ "$CENTER_KMER" -eq 1 ]]; then
+  TRIM_ARGS+=(--center)
+else
+  TRIM_ARGS+=(--start "$KMER_START")
+fi
+if [[ "$ALLOW_PAD" -eq 1 ]]; then
+  TRIM_ARGS+=(--allow-pad --seed "$SEED")
+fi
 python3 "${SCRIPT_DIR}/trim_to_kmer.py" "${TRIM_ARGS[@]}"
 
 log "done"
 log "  lane merges : $L1_MERGED , $L2_MERGED"
 log "  combined    : $COMBINED_GZ / $COMBINED_FQ"
 log "  fasta       : $FASTA"
-log "  length norm : $FASTA_FILTERED"
+log "  length filt : $FASTA_FILTERED"
 log "  k-mers      : $KMER_OUT"

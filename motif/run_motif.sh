@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SELEXpipe motif-processing driver
 #
-# Runs totalautomodelIC on SEQ files produced by preprocessing/trim_to_kmer.py.
+# Runs totalautomodelIC on SEQ files produced by preprocessing/trim_to_kmer.py
+# (one fixed-width line per molecule; default width 40).
+# Refuses to run if any SEQ line length ≠ --seq-length.
 # Filenames are generic (no experiment-specific IDs).
 #
 # Original recipe (genericised):
@@ -50,7 +52,8 @@ Optional:
   --bin-dir DIR              Directory containing totalautomodelIC and spacek40
                              (default: motif/ next to this script)
   --work-dir DIR             Working directory for motif outputs (default: .)
-  --seq-length N             SEQ line length flag as -NN (default: 40 -> -40N)
+  --seq-length N             Expected SEQ line width and -NN flag (default: 40).
+                             Refuses to run if any line length differs.
   --multinomial N            Multinomial setting (default: 1)
   --min-seed N               Minimum seed length (default: 6)
   --max-seed N               Maximum seed length (default: 6)
@@ -114,10 +117,48 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+validate_seq_width() {
+  local file="$1"
+  local expected="$2"
+  local label="$3"
+  python3 - "$file" "$expected" "$label" <<'PY'
+import sys
+
+path, expected_s, label = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    expected = int(expected_s)
+except ValueError:
+    sys.exit(f"[motif] error: --seq-length must be an integer, got {expected_s!r}")
+if expected <= 0:
+    sys.exit(f"[motif] error: --seq-length must be positive, got {expected}")
+
+n = 0
+with open(path, encoding="utf-8") as handle:
+    for lineno, raw in enumerate(handle, 1):
+        seq = raw.rstrip("\n\r")
+        if not seq:
+            sys.exit(f"[motif] error: {label} SEQ line {lineno} is empty ({path})")
+        if len(seq) != expected:
+            sys.exit(
+                f"[motif] error: {label} SEQ line {lineno} length {len(seq)} "
+                f"!= expected {expected} ({path})"
+            )
+        n += 1
+if n == 0:
+    sys.exit(f"[motif] error: {label} SEQ is empty ({path})")
+PY
+}
+
 [[ -n "$BACKGROUND" ]] || { usage; die "--background is required"; }
 [[ -n "$SIGNAL" ]] || { usage; die "--signal is required"; }
 [[ -f "$BACKGROUND" ]] || die "background SEQ not found: $BACKGROUND"
 [[ -f "$SIGNAL" ]] || die "signal SEQ not found: $SIGNAL"
+
+# Refuse mismatched / empty SEQ files before requiring motif binaries.
+command -v python3 >/dev/null 2>&1 || die "required command not found: python3"
+validate_seq_width "$BACKGROUND" "$SEQ_LENGTH" "background"
+validate_seq_width "$SIGNAL" "$SEQ_LENGTH" "signal"
+
 [[ -d "$BIN_DIR" ]] || die "bin directory not found: $BIN_DIR"
 
 BACKGROUND="$(cd "$(dirname "$BACKGROUND")" && pwd)/$(basename "$BACKGROUND")"

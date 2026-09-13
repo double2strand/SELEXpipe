@@ -1,6 +1,8 @@
 # Motif processing
 
-This module runs motif discovery on SEQ files produced by [`preprocessing/trim_to_kmer.py`](../preprocessing/trim_to_kmer.py), using **`totalautomodelIC`** (v0.22) with **`spacek40`**.
+This module runs motif discovery on SEQ files produced by [`preprocessing/trim_to_kmer.py`](../preprocessing/trim_to_kmer.py) (one fixed-width line per molecule), using **`totalautomodelIC`** (v0.22) with **`spacek40`**.
+
+`run_motif.sh` **refuses to run** if the background or signal SEQ is empty, or if any line length ≠ `--seq-length` (default **40**). That guard exists so tiled/padded/variable-width libraries cannot silently feed `totalautomodelIC`.
 
 ## What it does
 
@@ -44,7 +46,7 @@ Generic equivalents:
   1 6 6 0.25 - 20 50 0.1 SIGNAL_r3v1
 ```
 
-SEQ inputs are the one-sequence-per-line 40-mers from preprocessing (`{SAMPLE}_{N}.seq`). The `-40N` flag matches that k-mer length.
+SEQ inputs are one-sequence-per-line k-mers from preprocessing (`{SAMPLE}_{N}.seq`), one extract per molecule. The `-40N` flag must match that width; the driver checks every line before invoking `totalautomodelIC`.
 
 ## `totalautomodelIC` argument order
 
@@ -101,5 +103,5 @@ Primary output: `{output_prefix}_logos.svg` in `--work-dir`, plus refined PFMs /
 | File | Role |
 |------|------|
 | `totalautomodelIC` | Upstream motif automation script (unchanged) |
-| `run_motif.sh` | Generic-named driver around `totalautomodelIC` |
+| `run_motif.sh` | Generic-named driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length` |
 | `spacek40` | Required external binary (not shipped; supply locally) |

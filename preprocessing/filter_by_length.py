@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Normalize FASTA reads to a user-specified fixed length.
+"""Filter FASTA reads by merged-construct length.
 
-Keeps only reads within an allowed input-length window, then pads shorter
-reads (random A/T/C/G) or trims longer reads so every retained sequence is
-exactly ``--target_length`` bases.
+Default contract (safe for motif input):
+  * exact-length retention (min = max = target)
+  * short reads are dropped
+  * no random ATCG is written unless ``--allow-pad`` is set (requires ``--seed``)
 
-Expected merged-read lengths for common ligand designs:
+Expected merged-read lengths for common ligand designs (do not "correct"):
 
 | Ligand design | Expected length |
 |---------------|-----------------|
@@ -13,6 +14,9 @@ Expected merged-read lengths for common ligand designs:
 | lig200        | 154 bp          |
 | ligN40        | 187 bp          |
 | ligN70        | 247 bp          |
+
+ligN40 vs ligN70 constant flanks differ; the 60 bp (not 30 bp) length
+delta is expected.
 
 Use ``--ligand`` to select a design, or ``--target_length`` for an explicit value.
 """
@@ -28,12 +32,19 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 # Expected merged-read lengths for supported ligand designs.
+# ligN40 and ligN70 use different constant flanks; Δ60 vs a 30 bp N-region
+# difference is expected and must not be "fixed".
 LIGAND_LENGTHS: dict[str, int] = {
     "lig147": 101,
     "lig200": 154,
     "ligN40": 187,
     "ligN70": 247,
 }
+
+LIGAND_FLANK_NOTE = (
+    "ligN40 (187 bp) and ligN70 (247 bp) use different constant flanks; "
+    "the 60 bp merged-length delta is expected (not a 30 bp N-region typo)."
+)
 
 
 def normalize_fasta_to_fixed_length(
@@ -43,19 +54,13 @@ def normalize_fasta_to_fixed_length(
     min_input_len: int,
     max_input_len: int,
     trim_from: str = "right",
+    allow_pad: bool = False,
+    seed: int | None = None,
 ) -> dict[str, int]:
-    """
-    Keep only reads within an allowed input-length window, then normalize all
-    kept reads to exactly ``target_length`` by padding shorter reads or
-    trimming longer reads.
+    """Keep reads in ``[min_input_len, max_input_len]``, then trim or (opt-in) pad.
 
-    Args:
-        input_fasta: Input FASTA file
-        output_fasta: Output FASTA file
-        target_length: Final required length for all retained reads
-        min_input_len: Minimum input length to retain
-        max_input_len: Maximum input length to retain
-        trim_from: ``right``, ``left``, or ``center``
+    Short reads are dropped unless ``allow_pad`` is true. Padding always
+    requires ``seed``.
     """
     if target_length <= 0:
         raise ValueError(f"target_length must be positive, got {target_length}")
@@ -72,8 +77,10 @@ def normalize_fasta_to_fixed_length(
         )
     if trim_from not in {"right", "left", "center"}:
         raise ValueError("--trim_from must be one of: right, left, center")
+    if allow_pad and seed is None:
+        raise ValueError("--allow-pad requires --seed so padding is reproducible")
 
-    bases = ["A", "T", "C", "G"]
+    rng = random.Random(seed) if allow_pad else None
 
     n_total = 0
     n_kept = 0
@@ -87,18 +94,18 @@ def normalize_fasta_to_fixed_length(
             sequence = str(record.seq).upper()
             length = len(sequence)
 
-            # Discard reads outside allowed input range
             if length < min_input_len or length > max_input_len:
                 n_discarded += 1
                 continue
 
-            # Pad shorter reads
             if length < target_length:
+                if not allow_pad:
+                    n_discarded += 1
+                    continue
+                assert rng is not None
                 padding_length = target_length - length
-                sequence = sequence + "".join(random.choices(bases, k=padding_length))
+                sequence = sequence + "".join(rng.choices("ATCG", k=padding_length))
                 n_padded += 1
-
-            # Trim longer reads
             elif length > target_length:
                 if trim_from == "right":
                     sequence = sequence[:target_length]
@@ -110,7 +117,6 @@ def normalize_fasta_to_fixed_length(
                     sequence = sequence[left_trim : left_trim + target_length]
                 n_trimmed += 1
 
-            # Keep exact-length reads unchanged
             assert len(sequence) == target_length
 
             adjusted_record = SeqRecord(
@@ -136,16 +142,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser = argparse.ArgumentParser(
         description=(
-            "Filter FASTA reads by an input-length window, then normalize all "
-            "retained reads to a user-specified fixed length (pad or trim)."
+            "Filter FASTA reads by length. Default keeps exact target length "
+            "only and never pads. Use --allow-pad (with --seed) to pad shorts "
+            "when the input window is opened below the target."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Ligand design expected lengths:\n"
+            "Ligand design expected merged lengths:\n"
             "  lig147  101 bp\n"
             "  lig200  154 bp\n"
             "  ligN40  187 bp\n"
             "  ligN70  247 bp\n"
+            f"\n{LIGAND_FLANK_NOTE}\n"
         ),
     )
     parser.add_argument("input_fasta", type=str, help="Input FASTA file")
@@ -188,10 +196,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="How to trim reads longer than target_length (default: right)",
     )
     parser.add_argument(
+        "--allow-pad",
+        action="store_true",
+        help="Opt-in: pad reads shorter than target_length with random ATCG (requires --seed)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
-        help="Random seed for reproducible padding",
+        help="RNG seed required when --allow-pad is set",
     )
     return parser.parse_args(argv)
 
@@ -213,9 +226,6 @@ def main(argv: list[str] | None = None) -> int:
         args.max_input_len if args.max_input_len is not None else target_length
     )
 
-    if args.seed is not None:
-        random.seed(args.seed)
-
     try:
         stats = normalize_fasta_to_fixed_length(
             input_fasta=args.input_fasta,
@@ -224,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
             min_input_len=min_input_len,
             max_input_len=max_input_len,
             trim_from=args.trim_from,
+            allow_pad=args.allow_pad,
+            seed=args.seed,
         )
     except Exception as exc:  # noqa: BLE001 - surface errors to CLI
         print(f"error: {exc}", file=sys.stderr)
@@ -233,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[OK] Ligand design:  {ligand_label}")
     print(f"[OK] Target length:  {target_length}")
     print(f"[OK] Input window:   {min_input_len}-{max_input_len}")
+    print(f"[OK] Padding:        {'on' if args.allow_pad else 'off (shorts dropped)'}")
     print(f"[OK] Total reads:    {stats['total']}")
     print(f"[OK] Reads kept:     {stats['kept']}")
     print(f"[OK] Reads padded:   {stats['padded']}")

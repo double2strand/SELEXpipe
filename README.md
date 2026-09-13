@@ -33,8 +33,8 @@ Raw SELEX reads / libraries
         ▼
 ┌───────────────────┐
 │  Pre-processing   │  fastp adapter trim + PE merge (per lane),
-│                   │  lane concat, FASTQ→FASTA, length normalize
-│                   │  (filter_by_length.py), trim to k-mers (40)
+│                   │  lane concat, FASTQ→FASTA, exact-length filter,
+│                   │  one k-mer extract per molecule (default 40)
 └─────────┬─────────┘
           │
           ▼
@@ -76,25 +76,29 @@ Each stage is designed to be modular: inputs and outputs should be explicit, int
 
 ### 1. Pre-processing
 
-**Status: implemented** (see [`preprocessing/`](./preprocessing/)).
+**Status: implemented** (see [`preprocessing/`](./preprocessing/)). Default path is exact-length + one extract per read; it does not inject synthetic sequence.
 
-Pre-processing converts raw paired-end SELEX FASTQ reads (typically two lanes per sample) into analysis-ready fixed-length sequence sets. The current workflow:
+Pre-processing converts raw paired-end SELEX FASTQ reads (typically two lanes per sample) into analysis-ready SEQ files. The current workflow:
 
 1. **`fastp`** — quality filtering (`-q 10`), adapter trimming (user-supplied adapter FASTA, e.g. TruSeq3 PE), overlap-based merging of R1/R2 (`-m`), polyG/complexity filters, and per-lane HTML/JSON QC reports.
 2. **Lane concatenation** — `cat` the two lane-merged `.fq.gz` files into a single sample-level FASTQ.gz.
-3. **Decompress** — `gzip -d` to an uncompressed FASTQ.
+3. **Decompress** — `gzip -d -f -c` writes an uncompressed FASTQ **copy**; the `.fq.gz` is kept (do not use in-place `gzip -d`).
 4. **FASTQ → FASTA** — `seqtk seq -a`.
-5. **Length normalization (`filter_by_length.py`)** — retain reads in a user-specified input-length window, then pad or trim so every kept sequence is exactly `--target_length`, or the length implied by `--ligand` (see ligand table below; no hard-coded default).
-6. **k-mer / SEQ conversion** — split retained reads into consecutive fixed-length lines (default **40 bp**) via `trim_to_kmer.py`, padding any short trailing chunk with random A/T/C/G, writing a one-sequence-per-line `.seq` file.
+5. **Length filter (`filter_by_length.py`)** — keep reads whose length equals `--target_length`, or the length implied by `--ligand` (see ligand table below; no hard-coded default). Default window is exact (`min = max = target`). Shorts are dropped. Random ATCG padding is **not** the default; it requires `--allow-pad` and `--seed`.
+6. **One-window extract** — `trim_to_kmer.py` writes **one** SEQ line per retained molecule (default **40 bp**, `--start` or `--center`). Short windows are dropped. This is not a tiled 40-mer library and does not invent trailing k-mers.
 
 #### Ligand design expected lengths
 
-| Ligand design | Expected length |
-|---------------|-----------------|
-| lig147        | 101 bp          |
-| lig200        | 154 bp          |
-| ligN40        | 187 bp          |
-| ligN70        | 247 bp          |
+These are merged construct lengths. They are correct; do not change them.
+
+| Ligand design | Expected merged length |
+|---------------|------------------------|
+| lig147        | 101 bp                 |
+| lig200        | 154 bp                 |
+| ligN40        | 187 bp                 |
+| ligN70        | 247 bp                 |
+
+**Flanks differ:** ligN40 and ligN70 use different constant flanks. The 60 bp merged-length delta (187 vs 247) is expected — it is not a 30 bp N-region typo. Do not "correct" 187 / 247.
 
 Inputs use a generic sample prefix (`SAMPLE_L1_R1.fastq.gz`, …). Full usage is documented in [`preprocessing/README.md`](./preprocessing/README.md).
 
@@ -119,9 +123,9 @@ Re-formatting standardises heterogeneous SELEX artefacts into pipeline-native re
 
 ### 4. Motif discovery
 
-**Status: implemented** (see [`motif/`](./motif/)).
+**Status: implemented** (see [`motif/`](./motif/)). The driver refuses SEQ files whose line width ≠ `--seq-length` (default 40).
 
-Motif discovery consumes SEQ files from preprocessing (`trim_to_kmer.py`) and runs **`totalautomodelIC`** (with **`spacek40`**) to:
+Motif discovery consumes SEQ files from preprocessing (`trim_to_kmer.py`, one extract per molecule) and runs **`totalautomodelIC`** (with **`spacek40`**) to:
 
 - Discover local-maximum k-mer seeds in signal vs. background libraries.
 - Build and trim PFMs / logos for each seed.
@@ -165,14 +169,14 @@ This repository is in an early stage. The documentation above describes the **in
 
 | Area                    | Status                                      |
 |-------------------------|---------------------------------------------|
-| Pre-processing          | Implemented (`preprocessing/`)              |
+| Pre-processing          | Implemented (`preprocessing/`; default path drops shorts, no pad) |
 | Filtering               | Planned                                     |
 | Re-formatting           | Planned                                     |
-| Motif discovery         | Implemented (`motif/`)                      |
+| Motif discovery         | Implemented (`motif/`; refuses width-mismatched SEQ) |
 | Motif position matching | Planned                                     |
 | MI analyses             | Planned                                     |
 | End-to-end CLI / config | Partial (preprocess + motif drivers)        |
-| Example datasets / tests| Planned                                     |
+| Example datasets / tests| Partial (`tests/` covers extract / drop / no-pad) |
 
 ---
 
@@ -201,7 +205,13 @@ Requires `fastp`, `seqtk`, `gzip`, `bash`, `python3`, and Biopython (`pip instal
   --output-dir ./processed
 ```
 
-See [`preprocessing/README.md`](./preprocessing/README.md) for file naming, `fastp` defaults, and standalone helper usage.
+See [`preprocessing/README.md`](./preprocessing/README.md) for file naming, `fastp` defaults, standalone helper usage, and the `--allow-pad` opt-in.
+
+Helper contract (no FASTQ required):
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 ### Motif processing
 
