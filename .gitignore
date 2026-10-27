@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# External motif binary. totalautomodelIC calls ./spacek40; supply it locally.
+spacek40
+**/spacek40
+
+# Sequencing inputs and pipeline output directories
+raw/
+processed/
+motif_out/
+
+# Compressed and plain FASTQ (example FASTA under data/examples/ is tracked)
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+
+# fastp reports
+*.html
+*.json
+
+# One-sequence-per-line motif libraries (can be large)
+*.seq
+!data/examples/**/*.seq
+
+# totalautomodelIC working files and logo output
+*.tmp
+*.tmp.pfm
+*.tmp.svg
+*.tmp.txt
+*_logos.svg
+*_refined_seeds.tmp.txt
+*_current_local_max_seeds.tmp

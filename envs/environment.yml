@@ -1,0 +1,17 @@
+# Conda environment for SELEXpipe.
+# Python package floor matches envs/requirements.txt (biopython>=1.81).
+# fastp, seqtk, gzip, and bc are not pip packages. fastp and seqtk were not
+# version-pinned in the original scripts, so they are not pinned here either.
+# spacek40 is an external binary and is not part of this environment.
+# No download location for it is recorded in the repository.
+name: selexpipe
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.9
+  - biopython>=1.81
+  - fastp
+  - seqtk
+  - bc

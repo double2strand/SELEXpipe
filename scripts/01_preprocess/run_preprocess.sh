@@ -99,7 +99,7 @@ Optional:
 Default path: exact-length filter, one window per read, drop shorts, no padding.
 
 Example:
-  ./run_preprocess.sh \
+  scripts/01_preprocess/run_preprocess.sh \
       --sample SAMPLE \
       --adapter-fasta ./Adapters_TruSeq3PE.fa \
       --ligand lig147 \

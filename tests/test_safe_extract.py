@@ -28,8 +28,8 @@ def load_module(name: str, rel: str):
     return module
 
 
-trim_to_kmer = load_module("trim_to_kmer", "preprocessing/trim_to_kmer.py")
-filter_by_length = load_module("filter_by_length", "preprocessing/filter_by_length.py")
+trim_to_kmer = load_module("trim_to_kmer", "scripts/01_preprocess/trim_to_kmer.py")
+filter_by_length = load_module("filter_by_length", "scripts/01_preprocess/filter_by_length.py")
 
 # Deterministic 101-mer (lig147 merged width). Blocks are unique so a leftover
 # 21-mer cannot appear inside the first 40-mer (the old tile+pad artefact).
@@ -209,7 +209,7 @@ class TestMotifDriverWidthGuard(unittest.TestCase):
         return subprocess.run(
             [
                 "bash",
-                str(ROOT / "motif" / "run_motif.sh"),
+                str(ROOT / "scripts" / "02_motif" / "run_motif.sh"),
                 "--background",
                 str(background),
                 "--signal",

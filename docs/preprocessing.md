@@ -1,5 +1,8 @@
 # Preprocessing
 
+Paths below are relative to the repository root. Scripts live in
+`scripts/01_preprocess/`.
+
 This module converts raw paired-end SELEX FASTQ reads into analysis-ready
 fixed-width SEQ files for motif discovery.
 
@@ -57,19 +60,21 @@ Outputs written under `--output-dir/{SAMPLE}/` (example with lig147 / 101 bp):
 | Length-filtered FASTA | `{SAMPLE}_{N}.fa` |
 | One k-mer per read (plain text) | `{SAMPLE}_{N}.seq` |
 
-Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`).
+Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`). None is shipped in this repository.
+
+`data/examples/lig147_synthetic.fa` is a three-record synthetic FASTA for the length filter and k-mer extract only. It is not a sequencing run.
 
 ## Dependencies
 
 - [`fastp`](https://github.com/OpenGene/fastp)
 - [`seqtk`](https://github.com/lh3/seqtk)
 - `gzip`, `bash`, `python3` (≥ 3.9 recommended)
-- [Biopython](https://biopython.org/) (`pip install -r requirements.txt`)
+- [Biopython](https://biopython.org/) (`pip install -r envs/requirements.txt`)
 
 ## Usage
 
 ```bash
-./preprocessing/run_preprocess.sh \
+scripts/01_preprocess/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
   --ligand lig147 \
@@ -82,7 +87,7 @@ Provide exactly one of `--ligand` or `--target-length` (no hard-coded default su
 Opt-in padding (not the default; requires a seed):
 
 ```bash
-./preprocessing/run_preprocess.sh \
+scripts/01_preprocess/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
   --ligand lig200 \
@@ -116,8 +121,8 @@ fastp -q 10 \
 cat SAMPLE_L1.fq.gz SAMPLE_L2.fq.gz > SAMPLE.fq.gz
 gzip -d -f -c SAMPLE.fq.gz > SAMPLE.fq
 seqtk seq -a SAMPLE.fq > SAMPLE.fa
-python3 preprocessing/filter_by_length.py SAMPLE.fa SAMPLE_101.fa --ligand lig147
-python3 preprocessing/trim_to_kmer.py SAMPLE_101.fa SAMPLE_101.seq --kmer-size 40
+python3 scripts/01_preprocess/filter_by_length.py SAMPLE.fa SAMPLE_101.fa --ligand lig147
+python3 scripts/01_preprocess/trim_to_kmer.py SAMPLE_101.fa SAMPLE_101.seq --kmer-size 40
 ```
 
 ### Helper scripts
@@ -128,13 +133,13 @@ python3 preprocessing/trim_to_kmer.py SAMPLE_101.fa SAMPLE_101.seq --kmer-size 4
 
 ```bash
 # Exact-length filter via ligand design key
-python3 preprocessing/filter_by_length.py input.fa output_101.fa --ligand lig147
+python3 scripts/01_preprocess/filter_by_length.py input.fa output_101.fa --ligand lig147
 
 # Or set an explicit length
-python3 preprocessing/filter_by_length.py input.fa output_154.fa --target_length 154
+python3 scripts/01_preprocess/filter_by_length.py input.fa output_154.fa --target_length 154
 
 # Windowed retention; shorts still dropped unless --allow-pad --seed
-python3 preprocessing/filter_by_length.py input.fa output_154.fa \
+python3 scripts/01_preprocess/filter_by_length.py input.fa output_154.fa \
   --ligand lig200 \
   --min_input_len 145 \
   --max_input_len 163 \
@@ -143,13 +148,13 @@ python3 preprocessing/filter_by_length.py input.fa output_154.fa \
   --seed 1
 
 # One 40-base window per read (default: start=0). Shorts dropped, no padding.
-python3 preprocessing/trim_to_kmer.py input_101.fa output.seq --kmer-size 40
+python3 scripts/01_preprocess/trim_to_kmer.py input_101.fa output.seq --kmer-size 40
 
 # Centered window
-python3 preprocessing/trim_to_kmer.py input_101.fa output.seq --kmer-size 40 --center
+python3 scripts/01_preprocess/trim_to_kmer.py input_101.fa output.seq --kmer-size 40 --center
 
 # Opt-in short-window padding (seed required)
-python3 preprocessing/trim_to_kmer.py input.fa output.seq --kmer-size 40 --allow-pad --seed 1
+python3 scripts/01_preprocess/trim_to_kmer.py input.fa output.seq --kmer-size 40 --allow-pad --seed 1
 ```
 
 ## `fastp` parameters (current defaults)

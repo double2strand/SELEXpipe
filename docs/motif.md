@@ -1,6 +1,9 @@
 # Motif processing
 
-This module runs motif discovery on SEQ files produced by [`preprocessing/trim_to_kmer.py`](../preprocessing/trim_to_kmer.py) (one fixed-width line per molecule), using **`totalautomodelIC`** (v0.22) with **`spacek40`**.
+Paths below are relative to the repository root. Scripts live in
+`scripts/02_motif/`.
+
+This module runs motif discovery on SEQ files produced by [`scripts/01_preprocess/trim_to_kmer.py`](../scripts/01_preprocess/trim_to_kmer.py) (one fixed-width line per molecule), using **`totalautomodelIC`** (v0.22) with **`spacek40`**.
 
 `run_motif.sh` **refuses to run** if the background or signal SEQ is empty, or if any line length ≠ `--seq-length` (default **40**). That guard exists so tiled/padded/variable-width libraries cannot silently feed `totalautomodelIC`.
 
@@ -14,7 +17,7 @@ Given a background SEQ library and a signal (enriched) SEQ library:
 4. Refine accepted seeds (information content between 10 and 20 bits).
 5. Write accepted / unrefined / rejected models into an SVG logo file.
 
-The shipped `totalautomodelIC` script is the established analysis recipe and is **not modified** in this repository. It must be run with `spacek40` available as `./spacek40` in the working directory (the driver handles this).
+The shipped `totalautomodelIC` script (`scripts/02_motif/totalautomodelIC`) is the established analysis recipe and is **not modified** in this repository. It must be run with `spacek40` available as `./spacek40` in the working directory (the driver handles this).
 
 ## Generic naming
 
@@ -72,8 +75,8 @@ Defaults used by this pipeline (matching the original recipe):
 
 ## Dependencies
 
-- `totalautomodelIC` — included in this directory (bash; do not edit)
-- `spacek40` — external binary invoked as `./spacek40` by `totalautomodelIC`; place it in `motif/` (or pass `--bin-dir`)
+- `totalautomodelIC` — included at `scripts/02_motif/totalautomodelIC` (bash; do not edit)
+- `spacek40` — external binary invoked as `./spacek40` by `totalautomodelIC`; place it in `scripts/02_motif/` (or pass `--bin-dir`). No download location is recorded in this repository.
 - `bash`, `bc`, `awk`, `sed`, `grep`, `coreutils`
 
 ## Usage
@@ -81,7 +84,7 @@ Defaults used by this pipeline (matching the original recipe):
 Place `spacek40` next to `totalautomodelIC`, then:
 
 ```bash
-./motif/run_motif.sh \
+scripts/02_motif/run_motif.sh \
   --background ./processed/BACKGROUND/BACKGROUND_101.seq \
   --signal ./processed/SIGNAL_r4/SIGNAL_r4_101.seq \
   --output-prefix SIGNAL_r4v1 \
@@ -89,7 +92,7 @@ Place `spacek40` next to `totalautomodelIC`, then:
 ```
 
 ```bash
-./motif/run_motif.sh \
+scripts/02_motif/run_motif.sh \
   --background ./processed/BACKGROUND/BACKGROUND_101.seq \
   --signal ./processed/SIGNAL_r3/SIGNAL_r3_101.seq \
   --output-prefix SIGNAL_r3v1 \
@@ -102,6 +105,6 @@ Primary output: `{output_prefix}_logos.svg` in `--work-dir`, plus refined PFMs /
 
 | File | Role |
 |------|------|
-| `totalautomodelIC` | Upstream motif automation script (unchanged) |
-| `run_motif.sh` | Generic-named driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length` |
+| `scripts/02_motif/totalautomodelIC` | Upstream motif automation script (unchanged) |
+| `scripts/02_motif/run_motif.sh` | Driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length` |
 | `spacek40` | Required external binary (not shipped; supply locally) |

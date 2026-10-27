@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SELEXpipe motif-processing driver
 #
-# Runs totalautomodelIC on SEQ files produced by preprocessing/trim_to_kmer.py
+# Runs totalautomodelIC on SEQ files produced by
+# scripts/01_preprocess/trim_to_kmer.py
 # (one fixed-width line per molecule; default width 40).
 # Refuses to run if any SEQ line length ≠ --seq-length.
 # Filenames are generic (no experiment-specific IDs).
@@ -17,7 +18,8 @@
 #   output_prefix
 #
 # Requires the spacek40 binary alongside totalautomodelIC (the script
-# invokes ./spacek40). Place spacek40 in --bin-dir (default: this motif/).
+# invokes ./spacek40). Place spacek40 in --bin-dir
+# (default: the directory containing this script).
 
 set -euo pipefail
 
@@ -50,7 +52,7 @@ Required:
 Optional:
   --output-prefix NAME       Output name prefix (default: <signal_basename>v1)
   --bin-dir DIR              Directory containing totalautomodelIC and spacek40
-                             (default: motif/ next to this script)
+                             (default: the directory containing this script)
   --work-dir DIR             Working directory for motif outputs (default: .)
   --seq-length N             Expected SEQ line width and -NN flag (default: 40).
                              Refuses to run if any line length differs.
@@ -67,12 +69,12 @@ Optional:
 
 Generic equivalents of the original commands:
 
-  ./run_motif.sh \
+  scripts/02_motif/run_motif.sh \
       --background BACKGROUND_101.seq \
       --signal SIGNAL_r4_101.seq \
       --output-prefix SIGNAL_r4v1
 
-  ./run_motif.sh \
+  scripts/02_motif/run_motif.sh \
       --background BACKGROUND_101.seq \
       --signal SIGNAL_r3_101.seq \
       --output-prefix SIGNAL_r3v1
