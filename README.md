@@ -50,6 +50,7 @@ SELEXpipe/
 ├── scripts/
 │   ├── 01_preprocess/
 │   │   ├── run_preprocess.sh       # driver
+│   │   ├── run_fastp.sh            # one lane of the driver's fastp call
 │   │   ├── filter_by_length.py     # step inside the driver
 │   │   └── trim_to_kmer.py         # step inside the driver
 │   └── 02_motif/
@@ -148,6 +149,124 @@ Outputs under `processed/SAMPLE/` for lig200:
 
 ```bash
 scripts/01_preprocess/run_preprocess.sh --help
+```
+
+#### Running steps standalone
+
+The blocks below are the commands inside `run_preprocess.sh`, in the order it runs them. The [fastp](https://github.com/opengene/fastp) invocation matches that script. `scripts/01_preprocess/run_fastp.sh` runs the same fastp block for one lane: `in1 in2 out_prefix [adapters] [threads]`.
+
+Define the fastp variables, then run the block once per lane. `ADAPTER_FASTA` defaults to `config/adapters.fa`. `THREADS` is `nproc`, or 4 when `nproc` is missing. For lane 1 the driver sets `merged`, `json`, and `html` from `processed/SAMPLE/SAMPLE_L1` (lane 2 uses `SAMPLE_L2`).
+
+```bash
+in1=raw/SAMPLE_L1_R1.fastq.gz
+in2=raw/SAMPLE_L1_R2.fastq.gz
+merged=processed/SAMPLE/SAMPLE_L1.fq.gz
+ADAPTER_FASTA=config/adapters.fa
+json=processed/SAMPLE/SAMPLE_L1.json
+html=processed/SAMPLE/SAMPLE_L1.html
+THREADS="$(nproc 2>/dev/null || echo 4)"
+
+fastp \
+    -q 10 \
+    --in1 "$in1" \
+    --in2 "$in2" \
+    -m \
+    --merged_out "$merged" \
+    --adapter_fasta="$ADAPTER_FASTA" \
+    --json="$json" \
+    --html="$html" \
+    --overlap_len_require=5 \
+    -gx \
+    --length_required=15 \
+    --n_base_limit=10 \
+    -y \
+    --complexity_threshold=5 \
+    --thread "$THREADS"
+```
+
+| Flag | Meaning |
+|------|---------|
+| `-q 10` | Qualified-base quality cutoff (Phred) |
+| `--in1`, `--in2` | Paired reads for this lane |
+| `-m` | Merge overlapping pairs |
+| `--merged_out` | Write the merged reads |
+| `--adapter_fasta` | Adapter sequences. These are example adapters. If you use custom adapters, edit config/adapters.fa or pass your own file. |
+| `--json`, `--html` | fastp QC reports |
+| `--overlap_len_require=5` | Minimum overlap length for merging |
+| `-g` | Trim polyG tails |
+| `-x` | Trim polyX tails |
+| `--length_required=15` | Drop merged reads shorter than 15 bp |
+| `--n_base_limit=10` | Drop reads with more than 10 `N` bases |
+| `-y` | Enable the low-complexity filter |
+| `--complexity_threshold=5` | Low-complexity cutoff |
+| `--thread` | Worker threads (`THREADS`) |
+
+Same block for lane 2, or:
+
+```bash
+scripts/01_preprocess/run_fastp.sh \
+  raw/SAMPLE_L1_R1.fastq.gz \
+  raw/SAMPLE_L1_R2.fastq.gz \
+  processed/SAMPLE/SAMPLE_L1
+
+scripts/01_preprocess/run_fastp.sh \
+  raw/SAMPLE_L2_R1.fastq.gz \
+  raw/SAMPLE_L2_R2.fastq.gz \
+  processed/SAMPLE/SAMPLE_L2
+```
+
+Concatenate the lane merges. This is the driver's `cat`:
+
+```bash
+L1_MERGED=processed/SAMPLE/SAMPLE_L1.fq.gz
+L2_MERGED=processed/SAMPLE/SAMPLE_L2.fq.gz
+COMBINED_GZ=processed/SAMPLE/SAMPLE.fq.gz
+
+cat "$L1_MERGED" "$L2_MERGED" > "$COMBINED_GZ"
+```
+
+The driver then writes an uncompressed copy and leaves the `.fq.gz` in place. `seqtk` reads that copy:
+
+```bash
+COMBINED_FQ=processed/SAMPLE/SAMPLE.fq
+FASTA=processed/SAMPLE/SAMPLE.fa
+
+gzip -d -f -c "$COMBINED_GZ" > "$COMBINED_FQ"
+seqtk seq -a "$COMBINED_FQ" > "$FASTA"
+```
+
+Length filter. For `--ligand lig200` the driver sets the variables below (other ligands use that design's length and a ±9 bp window). `--seed "$SEED"` is added only when `SEED` is set.
+
+```bash
+SCRIPT_DIR=scripts/01_preprocess
+FASTA=processed/SAMPLE/SAMPLE.fa
+FASTA_FILTERED=processed/SAMPLE/SAMPLE_154.fa
+TARGET_LEN=154
+MIN_INPUT_LEN=145
+MAX_INPUT_LEN=163
+TRIM_FROM=right
+
+python3 "${SCRIPT_DIR}/filter_by_length.py" \
+  "$FASTA" \
+  "$FASTA_FILTERED" \
+  --target_length "$TARGET_LEN" \
+  --min_input_len "$MIN_INPUT_LEN" \
+  --max_input_len "$MAX_INPUT_LEN" \
+  --trim_from "$TRIM_FROM"
+```
+
+One k-mer per kept read. The default path passes `--start`, not `--center`. `--allow-pad --seed "$SEED"` is added only when k-mer padding was requested.
+
+```bash
+KMER_OUT=processed/SAMPLE/SAMPLE_154.seq
+KMER_SIZE=40
+KMER_START=0
+
+python3 "${SCRIPT_DIR}/trim_to_kmer.py" \
+  "$FASTA_FILTERED" \
+  "$KMER_OUT" \
+  --kmer-size "$KMER_SIZE" \
+  --start "$KMER_START"
 ```
 
 ### 1b. Length filter and k-mer extract on the synthetic example
