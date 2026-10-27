@@ -458,6 +458,18 @@ scripts/02_motif/run_motif.sh \
 
 Argument defaults (multinomial `1`, seed length `6`, length cutoff `0.25`, IUPAC cutoff `-`, local-max cutoff `20`, logo number `50`, similarity `0.1`) match the recipe documented in [`docs/motif.md`](docs/motif.md). `totalautomodelIC` itself was not edited.
 
+#### Simplified command
+
+`BACKGROUND_101.seq` and `SIGNAL_r4_101.seq` are the background and signal SEQ names used above. `SIGNAL_r4v1` is the output prefix from that `run_motif.sh` example. Run this from the work directory, where `./totalautomodelIC` and `./spacek40` are linked.
+
+```bash
+./totalautomodelIC -40N BACKGROUND_101.seq SIGNAL_r4_101.seq 1 6 12 0.25 - 20 100 0.1 SIGNAL_r4v1;
+```
+
+`-40N` length flag, `BACKGROUND_101.seq` background, `SIGNAL_r4_101.seq` signal, `1` multinomial, `6` minimum seed length, `12` maximum seed length, `0.25` length cutoff, `-` IUPAC cutoff disabled, `20` local-max count, `100` logo number, `0.1` logo similarity, `SIGNAL_r4v1` output prefix.
+
+Maximum seed length `12` and logo number `100` differ from the `run_motif.sh` defaults (maximum seed `6`, logo number `50`). The other numbers match those defaults.
+
 ```bash
 scripts/02_motif/run_motif.sh --help
 ```

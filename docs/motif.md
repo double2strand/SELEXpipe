@@ -73,6 +73,18 @@ Defaults used by this pipeline (matching the original recipe):
 | logo number cutoff | `50` |
 | logo similarity cutoff | `0.1` |
 
+## Simplified command
+
+`BACKGROUND_101.seq` and `SIGNAL_r4_101.seq` are the background and signal SEQ names used above. `SIGNAL_r4v1` is the output prefix from the `run_motif.sh` example. Run this from the work directory, where `./totalautomodelIC` and `./spacek40` are linked.
+
+```bash
+./totalautomodelIC -40N BACKGROUND_101.seq SIGNAL_r4_101.seq 1 6 12 0.25 - 20 100 0.1 SIGNAL_r4v1;
+```
+
+`-40N` length flag, `BACKGROUND_101.seq` background, `SIGNAL_r4_101.seq` signal, `1` multinomial, `6` minimum seed length, `12` maximum seed length, `0.25` length cutoff, `-` IUPAC cutoff disabled, `20` local-max count, `100` logo number, `0.1` logo similarity, `SIGNAL_r4v1` output prefix.
+
+Maximum seed length `12` and logo number `100` differ from the `run_motif.sh` defaults (maximum seed `6`, logo number `50`). The other numbers match those defaults.
+
 ## Dependencies
 
 - `totalautomodelIC` — included at `scripts/02_motif/totalautomodelIC` (bash; do not edit)
