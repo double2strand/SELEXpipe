@@ -1,0 +1,483 @@
+#!/bin/bash
+
+# CENTER GAPS
+# ./totalautomodelIC -[seq length] background_seq_file signal_seq_file multinomial min_seed_length max_seed_length length_cutoff iupac_cutoff(or '-' if IUPAC seed not used) local_max_cutoff_count logo_number_cutoff logo_similarity_cutoff constant_part_of_file_names
+# ALL GAPS
+# ./totalautomodelIC '-[seq length] -allgaps' background_seq_file signal_seq_file multinomial min_seed_length max_seed_length length_cutoff iupac_cutoff(or '-' if IUPAC seed not used) local_max_cutoff_count logo_number_cutoff logo_similarity_cutoff constant_part_of_file_names
+# example1 (40N ligand, multinomial 1, seed length 4-8, use longer seed if it has 0.35 x count of shorter, IUPAC base if its fraction above 0.25, require 500 instances of local max kmer, report 50 logos, accept ones that correlate less than 0.1.
+# ./totalautomodelIC -40N LoVoExo_MYC_summits_rand.txt LoVoExo_MYC_summits.txt 1 4 8 0.35 0.25 500 50 0.1 testfile
+# example2 (seed length 8, no IUPAC seed, require 20 instances of local max kmer, logo similarity cutoff 0.2)
+# ./totalautomodelIC -40N LoVoExo_RAD21_summits_rand.txt GCM1_ELK1_3_TTCGCT40NCTTAU3_sig.seq 1 8 8 .35 - 20 50 0.2 testfile
+# FINDS AUTOMATICALLY SEEDS AND MAKES ALL HIT LOGOS USING THEM WITH SPECIFIED MULTINOMIAL SETTING 
+# REFINES SEEDS BASED ON PREVIOUS MODEL, LIMITING THE INFORMATION CONTENT OF THE SEED BETWEEN 10 AND 20 BITS
+# RUNS THE SPECIFIED NUMBER OF LOCAL MAXIMA FOR HUDDINGE DISTANCE OF 1
+
+
+version="totalautomodelIC 0.22"
+version_date="03May2018"
+program="totalautomodelIC"
+
+similarity_cutoff=0.2;
+complexity=0.01;
+seed_complexity=0.01;
+flank_complexity=0.01;
+
+# FUNCTION THAT TRIMS A PFM (argument is prefix of filename, original pfm from stdin)
+trim-pfm ()
+{
+flank_length=0.1
+pfmfilename=$1_'tmp.pfm'
+rm -f original_$pfmfilename
+pfmend=0
+pfmstart=0
+seedcols=0
+endtrim=2
+while read line; do
+echo "$line"|  tr ' ' '\t' >> original_$pfmfilename
+done
+
+# zeroes negative columns
+sed s/'-'[1234567890]*/0/g original_$pfmfilename | cut -f4- > $pfmfilename
+rm -f original_$pfmfilename
+
+cols=$(awk 'BEGIN {FS="\t"} ; END{print NF}' $pfmfilename)
+totalcols=$cols
+seedlength=$(expr $totalcols - 22)
+cols=$(expr $cols - $endtrim)
+seed_complexity=0
+complexity=0
+
+while [ $cols -gt $endtrim ]
+do
+#echo $cols
+maxfrac=$(cut -f$cols $pfmfilename | awk 'NR == 1 { max=$1; min=$1; sum=0.001 }
+{ if ($1>max) max=$1; if ($1<min) min=$1; sum+=$1;}
+END {printf "%f\n", max/sum}')
+#echo $maxfrac
+complexity=$(echo $complexity '+' $maxfrac | bc -l)
+
+if [ $cols -lt $(expr $totalcols - 11) ] && [ $cols -gt 10 ]; then seed_complexity=$(echo $seed_complexity+$maxfrac | bc -l); seedcols=$(expr $seedcols + 1); fi
+
+if [ $pfmend -eq 0 ] && [ "$(echo $maxfrac '>' $2 | bc -l)" -eq 1 ];
+then pfmend=$cols; fi
+
+if [ "$(echo $maxfrac '>' $2 | bc -l)" -eq 1 ];
+then pfmstart=$cols; fi
+
+cols=$(expr $cols - 1)
+done
+
+flank_complexity=$(echo $complexity '-' $seed_complexity | bc -l);
+flank_length=$(echo $totalcols '-' $seedlength '-' $endtrim '-' $endtrim | bc -l);
+
+echo $(echo $complexity '/' $totalcols | bc -l) $(echo $seed_complexity '/' $seedlength | bc -l) $(echo $flank_complexity '/' $flank_length | bc -l) $totalcols $seedlength $seedcols $flank_length| tr ' ' '\t' > $1_comp.tmp
+cut -f$pfmstart-$pfmend $pfmfilename
+
+}
+
+# FUNCTION THAT IUPACS A PFM (argument is prefix of filename, original pfm from stdin)
+iupac-pfm ()
+{
+pfmfilename=$1_'tmp.pfm'
+rm -f $pfmfilename
+while read line; do
+echo "$line"|  tr ' ' '\t' >> $pfmfilename
+done
+
+cols=$(awk 'BEGIN {FS="\t"} ; END{print NF}' $pfmfilename)
+current_col=1
+
+while [ $current_col -le $cols ]; do
+maxval=$(cut -f$current_col $pfmfilename | awk 'NR == 1 { max=$1; min=$1; sum=0.001 } { if ($1>max) max=$1; if ($1<min) min=$1; sum+=$1;} END {printf "%f\n", max}')
+
+if [ $(bc <<< "$maxval > 0") -eq 1 ]; then
+nucvalue=1
+count=$(cut -f$current_col $pfmfilename | head -1 | tail -1)
+#echo position $current_col base A fraction is $(echo $count '/' $maxval | bc -l)
+if [ "$(echo $count '/' $maxval '>' $2 | bc -l)" -eq 1 ]; then nucvalue=2; fi 
+count=$(cut -f$current_col $pfmfilename | head -2 | tail -1)
+if [ "$(echo $count '/' $maxval '>' $2 | bc -l)" -eq 1 ]; then nucvalue=$(expr $nucvalue + 2); fi
+count=$(cut -f$current_col $pfmfilename | head -3 | tail -1)
+if [ "$(echo $count '/' $maxval '>' $2 | bc -l)" -eq 1 ]; then nucvalue=$(expr $nucvalue + 4); fi
+count=$(cut -f$current_col $pfmfilename | head -4 | tail -1)
+if [ "$(echo $count '/' $maxval '>' $2 | bc -l)" -eq 1 ]; then nucvalue=$(expr $nucvalue + 8); fi
+#echo $nucvalue
+echo XACMGRSVTWYHKDBN | cut -c $nucvalue | tr -d ' \n';
+fi
+
+if [ $(bc <<< "$maxval > 0") -eq 0 ]; then echo N | tr -d ' \n'; fi
+
+current_col=$(expr $current_col + 1)
+
+done
+
+echo
+rm -f $pfmfilename
+}
+
+# FUNCTION THAT KMERS A PFM (argument is prefix of filename, original pfm from stdin)
+kmer-pfm ()
+{
+pfmfilename=$1_'tmp.pfm'
+rm -f $pfmfilename
+while read line; do
+echo "$line"|  tr ' ' '\t' >> $pfmfilename
+done
+cols=$(awk 'BEGIN {FS="\t"} ; END{print NF}' $pfmfilename)
+current_col=1
+while [ $current_col -le $cols ]
+do
+#echo column $current_col
+#cat $pfmfilename | cut -f $current_col
+#echo base
+cat $pfmfilename | cut -f $current_col | cat -n | sort -n -r -k2 | head -1 | tr '1234' 'ACGT' | cut -f 1 | tr -d ' \n'
+current_col=$(expr $current_col + 1)
+done
+echo
+rm -f $pfmfilename
+}
+
+# FUNCTION THAT TRIMS Ns FROM THE END OF IUPAC KMER (from stdin)
+trim-kmer ()
+{
+sed -e 's/^N*//' -e 's/N*$//'
+}
+
+qc-pfm ()
+{
+quality="good"
+pfmfilename=$1_'tmp.pfm'
+rm -f $pfmfilename
+lines=0;
+while read line; do
+echo "$line"|  tr ' ' '\t' >> $pfmfilename
+lines=$(expr $lines + 1)
+done
+
+if [ $(echo $lines '!=' 4 | bc -l) -eq 1  ]; then
+if [ $(echo $lines '<' 2 | bc -l) -eq 1  ]; then quality="no_data"; fi
+if [ $(echo $lines '>' 4 | bc -l) -eq 1  ]; then quality="too_many_rows"; fi
+if [ $(echo $lines '<' 4 | bc -l) -eq 1  ]; then quality="too_few_rows"; fi
+
+else
+
+cols=$(awk 'BEGIN {FS="\t"} ; END{print NF}' $pfmfilename)
+current_col=1
+
+while [ $current_col -le $cols ]; do
+maxval=$(cut -f$current_col $pfmfilename | awk 'NR == 1 { max=$1; min=$1; sum=0.001 } { if ($1>max) max=$1; if ($1<min) min=$1; sum+=$1;} END {printf "%f\n", max}')
+if [ $(echo $maxval '==' 0 | bc -l) -eq 1 ]; then quality="undefined_columns"; break; fi
+current_col=$(expr $current_col + 1)
+done
+
+if [ $(echo $cols '>' $2 '-' 4 | bc -l) -eq 1  ]; then quality="too_long_width"; fi
+
+fi
+
+rm -f $pfmfilename
+echo $quality
+}
+
+# FUNCTION THAT DETERMINES INFORMATION CONTENT FOR SEED
+seed-IC ()
+{
+sed 's/^/0/' | sed 's/[ACGT]/+2/g' | sed 's/[RYMKWS]/+1/g' | sed 's/[BDHV]/+0.415/g' | sed 's/[NX]/+0/g' | bc
+}
+
+
+# FUNCTION THAT REFINES SEED
+refine-seed ()
+{
+result="failed to converge"
+round=0
+seed=$5
+
+rm -f $6_converged.tmp.pfm
+rm -f $6_tested_seeds.tmp
+
+length=$(echo $1 | cut -c2-3)
+
+echo round $round seed $seed
+echo $seed >> $6_tested_seeds.tmp
+
+while [ $round -le 10 ]; do
+
+# EXTRACTS SEED WITH IC >= 10 and <= 20 bits
+iupac_cutoff=0.4;
+seedIC=0;
+while [ $(bc <<< "$seedIC < 10") -eq 1 ]; do
+newseed=$(cat $6_unrefinedshortmodel$round.tmp.pfm | iupac-pfm $6 $iupac_cutoff | trim-kmer)
+seedIC=$(echo $newseed | seed-IC)
+echo current seed is $newseed with information content $seedIC
+xmatch=$(echo $newseed | grep X | wc -c)
+if [ $xmatch -gt 0 ]; then echo bad seed at min IC set loop; break; fi;
+iupac_cutoff=$(echo $iupac_cutoff + 0.05 | bc -l)
+done
+
+while [ $(bc <<< "$seedIC > 20") -eq 1 ]; do
+previous_seed=$newseed;
+newseed=$(cat $6_unrefinedshortmodel$round.tmp.pfm | iupac-pfm $6 $iupac_cutoff | trim-kmer)
+seedIC=$(echo $newseed | seed-IC)
+echo current seed is $newseed with information content $seedIC
+xmatch=$(echo $newseed | grep X | wc -c)
+if [ $xmatch -gt 0 ]; then echo bad seed at max IC set loop; break; fi;
+iupac_cutoff=$(echo $iupac_cutoff - 0.05 | bc -l)
+done
+if [ $(bc <<< "$seedIC < 10") -eq 1 ]; then newseed=$previous_seed; fi;
+
+rm -f $6_unrefinedlongmodel$round.tmp.pfm
+rm -f $6_unrefinedshortmodel$round.tmp.pfm
+round=$(expr $round + 1)
+echo round $round seed $newseed
+
+xmatch=$(echo $newseed | grep X | wc -c)
+if [ $xmatch -gt 0 ]; then result="bad final seed"; break; fi;
+
+./spacek40 --f -m=$4 -o=$6.tmp.svg $1 $2 $3 $newseed 500000 | grep All.Hits.[ACGT] > $6_unrefinedlongmodel$round.tmp.pfm
+
+cat $6_unrefinedlongmodel$round.tmp.pfm | trim-pfm $6 0.5 > $6_unrefinedshortmodel$round.tmp.pfm;
+
+#cat $6_unrefinedshortmodel$round.tmp.pfm | qc-pfm $6 $length
+quality=$(cat $6_unrefinedshortmodel$round.tmp.pfm | qc-pfm $6 $length)
+
+if [ $(cat $6_unrefinedshortmodel$round.tmp.pfm | wc -c) -eq 0 ]; then
+result="seed failed to generate pwm"; break; fi;
+
+if [ $quality == "good" ]; then
+echo pfm at $round is $quality
+
+if [ $newseed == $seed ]; then result="converged"; break; fi;
+
+match=$(cat $6_tested_seeds.tmp | grep ^$newseed$ | wc -c)
+if [ $match -gt 0 ]; then result="oscillating"; break; fi;
+echo $newseed >> $6_tested_seeds.tmp
+
+if [ $(echo $newseed | grep -o $seed | wc -c) -gt 0 ]; then echo seed at round $round contains seed from previous round; fi;
+
+if [ $newseed == "" ]; then result="low specificity"; break; fi;
+seed=$newseed;
+
+else 
+echo pfm at $round has $quality | tr '_' ' '
+break; fi
+
+done
+
+if [ $quality == "good" ]; then
+mv $6_unrefinedshortmodel$round.tmp.pfm $6_converged.tmp.pfm
+rm -f $6_unrefinedlongmodel$round.tmp.pfm
+echo $result at round $round to pfm $6_converged.tmp.pfm
+else
+echo $result at round $round 
+rm -f $6_unrefinedshortmodel$round.tmp.pfm
+rm -f $6_unrefinedlongmodel$round.tmp.pfm
+fi
+
+rm -f $6_tested_seeds.tmp
+}
+
+# MAIN PROGRAM START
+# MAIN PROGRAM START
+
+modelok=1;
+totallogos=0;
+similar_logo_position=100;
+unrefined_logo_position=100;
+similarity_cutoff=${11}
+max_n="nnnnnn";
+
+kmerlength=$(echo $1 | cut -c2-3)
+echo $kmerlength;
+
+# FINDS LOCAL MAX COUNTS
+if [ $8 == "-" ]; then
+./spacek40 $1 -local=$7 -o=${12}.tmp $2 $3 $5 $6 $9 | grep -e local_max | grep -v $max_n | sort -n -k12 | tail -n ${10} | sort -r -n -k12 >${12}_current_local_max_seeds.tmp;
+seedfield=6
+else
+./spacek40 $1 -local=$7 -o=${12}.tmp -iupac=$8 $2 $3 $5 $6 $9 | grep -e local_max | grep -v $max_n | sort -n -k12 | tail -n ${10} | sort -r -n -k12 >${12}_current_local_max_seeds.tmp;
+seedfield=7
+fi
+
+echo all local maxes;
+cat ${12}_current_local_max_seeds.tmp | cut -f3-12;
+
+# FILE NAME FOR LOGOS
+filename_suffix='logos.svg';
+accepted_logo_filename=${12}_$filename_suffix;
+rejected_logo_filename=rejected_${12}_$filename_suffix;
+unrefined_logo_filename=unrefined_${12}_$filename_suffix;
+rm -f $rejected_logo_filename;
+rm -f $accepted_logo_filename;
+rm -f $unrefined_logo_filename;
+rm -f ${12}_refined_seeds.tmp.txt
+
+# LOCAL MAX SEEDS : GENERATES A LIST FILE (seeds.tmp)
+local_seeds=`cat  ${12}_current_local_max_seeds.tmp | cut -f1 | grep -c 1`
+echo $local_seeds;
+cat ${12}_current_local_max_seeds.tmp | cut -f$seedfield | tr n N > ${12}_seeds.tmp
+
+# GENERATES LOGOS FOR ALL LOCAL MAX SEEDS 
+logo_position=0;
+counter=1;
+exec < ${12}_seeds.tmp
+while read seed
+do
+
+original_seed=$seed
+modelok=1;
+echo '-----'
+let totallogos=$totallogos+1;
+echo logo $totallogos seed $seed
+
+if [ $counter -eq 1 ]; then firstseed=$seed; echo first seed is $firstseed; fi
+
+faildueto="nothing"
+if [ ${#seed} -gt $(echo $kmerlength-4 | bc -l) ]; then modelok=0; faildueto="long seed"; 
+fi
+
+./spacek40 --f -m=$4 -o=${12}.tmp $1 $2 $3 $seed 500000 | grep All.Hits.[ACGT] > ${12}_longmodel$counter.tmp.pfm
+
+if [ $modelok -eq 1 ]; then cat ${12}_longmodel$counter.tmp.pfm | trim-pfm ${12} 0.4 > ${12}_shortmodel$counter.tmp.pfm; 
+complexity=$(cat ${12}_comp.tmp | cut -f1);
+seed_complexity=$(cat ${12}_comp.tmp | cut -f2);
+flank_complexity=$(cat ${12}_comp.tmp | cut -f3);
+#cat comp.tmp
+echo average max base frequency is $(echo $complexity | cut -c1-4) at seed $(echo $seed_complexity | cut -c1-4) at flank $(echo $flank_complexity | cut -c1-4);
+
+if [ $(echo $flank_complexity '>' 0.65 | bc -l) -eq 1 ] || [ $(echo $seed_complexity '<' 0.4 | bc -l) -eq 1 ] || [ $(echo $flank_complexity '>' $seed_complexity-0.05 | bc -l) -eq 1 ]; then modelok=0; echo too low complexity; faildueto="low complexity"; fi
+fi
+
+counter2=1;
+
+if [ $modelok -eq 1 ]; 
+then 
+
+# Checks if original model is too close to previously accepted models
+while [ $counter2 -lt $counter ]
+do
+similarity=$(./spacek40 --dist -o=${12}_similarity.tmp ${12}_shortmodel$counter2.tmp.pfm ${12}_shortmodel$counter.tmp.pfm gapped $6 | grep gapped | cut -f2 | sed s/.*e[0123456789-]*/0/)
+echo testing whether logo $totallogos is accepted as model number $counter: similarity to model $counter2 is $similarity
+if [ $(echo $similarity '>' $similarity_cutoff | bc -l) -eq 1 ]; then modelok=0; faildueto="much similarity to model "$counter2; break; fi
+let counter2=$counter2+1;
+done
+
+fi
+
+
+
+if [ $modelok -eq 1 ];
+then
+
+# REFINES SEED
+echo initial pfm
+cat ${12}_shortmodel$counter.tmp.pfm
+
+cp ${12}_shortmodel$counter.tmp.pfm ${12}_unrefinedshortmodel0.tmp.pfm
+
+rm -f ${12}_converged.tmp.pfm
+refine-seed "$1" $2 $3 $4 $seed ${12}
+
+if [ -f ${12}_converged.tmp.pfm ]; 
+then 
+
+counter2=1;
+# Checks if refined model is too close to previously accepted models
+while [ $counter2 -lt $counter ]
+do
+similarity=$(./spacek40 --dist -o=${12}_similarity.tmp ${12}_shortmodel$counter2.tmp.pfm ${12}_converged.tmp.pfm gapped $6 | grep gapped | cut -f2 | sed s/.*e[0123456789-]*/0/)
+echo testing whether refined logo $totallogos is accepted as model number $counter: similarity to model $counter2 is $similarity
+if [ $(echo $similarity '>' $similarity_cutoff | bc -l) -eq 1 ]; then modelok=0; faildueto="much similarity after refining to model "$counter2; break; fi
+let counter2=$counter2+1;
+done
+
+fi
+
+if [ $modelok -eq 1 ];
+then
+
+if [ -f ${12}_converged.tmp.pfm ]; 
+then 
+
+mv ${12}_converged.tmp.pfm ${12}_shortmodel$counter.tmp.pfm
+mv ${12}.tmp.svg ${12}.tmp
+
+let logo_position=$logo_position+110;
+
+current_seed=$(cat ${12}_shortmodel$counter.tmp.pfm | iupac-pfm ${12}_iupac 0.4)
+echo logo $totallogos with original seed $original_seed and refined seed $current_seed ***ACCEPTED*** as model $counter;
+
+cp ${12}_shortmodel$counter.tmp.pfm ${12}_refined_model$counter.tmp.pfm
+cp ${12}.tmp ${12}_refined_model$counter.tmp.svg
+echo $current_seed >> ${12}_refined_seeds.tmp.txt
+
+let counter=$counter+1;
+
+
+if [ $counter -eq 2 ]; then cat ${12}.tmp | grep -A5 standalone | sed s/$firstseed' -'/'Accepted models -'/ | sed s/'="2000'/'="3000'/ | sed s/'="5000'/'="10000'/  > $accepted_logo_filename ;
+echo '<!--' this file is generated $(date) using $version command: $program "$1" $2 $3 $4 $5 $6 $7 $8 $9 ${10} ${11}'-->' >> $accepted_logo_filename;
+# echo '</g>' >> $accepted_logo_filename;
+fi;
+
+awk ' /group3/ {flag=1} /group4/{flag=0} flag { print }'  ${12}.tmp | sed s/translate\(0,....\)/translate\(-100,$logo_position\)/ | sed s/'All hits :'/model' '$(echo $counter '-' 1 | bc -l)' seed '$totallogos' '$current_seed' '/ >> $accepted_logo_filename;
+
+
+
+else
+faildueto="failed to refine"
+echo logo $totallogos with seed $original_seed failed to refine;
+awk ' /group3/ {flag=1} /group4/{flag=0} flag { print }' ${12}.tmp | sed s/translate\(0,....\)/translate\(-100,$unrefined_logo_position\)/ | sed s/'All hits :'/seed' '$totallogos-' '$original_seed' '$(echo $faildueto | tr ' ' '_')/ >> $unrefined_logo_filename;
+let unrefined_logo_position=$unrefined_logo_position+110;
+
+fi;
+fi;
+fi;
+
+if [ $modelok -eq 0 ];
+then
+echo logo $totallogos with seed $seed NOT accepted, it has too $faildueto;
+awk ' /group3/ {flag=1} /group4/{flag=0} flag { print }' ${12}.tmp | sed s/translate\(0,....\)/translate\(-100,$similar_logo_position\)/ | sed s/'All hits :'/seed' '$totallogos-' '$original_seed' 'too_$(echo $faildueto | tr ' ' '_')/ >> $rejected_logo_filename;
+let similar_logo_position=$similar_logo_position+110;
+fi;
+
+done
+
+
+# REMOVES LAST MODELS IF THEY WERE NOT ACCEPTED
+if [ $modelok -eq 0 ]; then
+rm ${12}_shortmodel$counter.tmp.pfm
+rm ${12}_longmodel$counter.tmp.pfm
+fi
+let counter=$counter-1;
+
+echo
+echo "----------------"
+echo A TOTAL OF $counter MODELS FOUND
+echo
+
+# ADDS SIMILAR LOGOS BELOW ACCEPTED LOGOS
+
+if [ $counter -eq 0 ]; then cat ${12}.tmp | grep -A4 standalone | sed s/'="2000'/'="3000'/ | sed s/'="5000'/'="10000'/  > $accepted_logo_filename ; 
+fi
+
+let logo_position=$logo_position+110;
+
+
+echo '<g id="unrefined_matrices" transform="translate(-100,'$logo_position')">' >> $accepted_logo_filename
+echo '<text  x="180" y="50" fill = "black" stroke = "black" font-size="30" font-family = "Courier" >Unrefined models</text>' >> $accepted_logo_filename
+cat $unrefined_logo_filename >> $accepted_logo_filename
+echo '</g>' >> $accepted_logo_filename
+
+logo_position=$(echo $logo_position '+' $unrefined_logo_position | bc -l);
+
+echo '<g id="not_accepted_matrices" transform="translate(-100,'$logo_position')">' >> $accepted_logo_filename
+echo '<text  x="180" y="50" fill = "black" stroke = "black" font-size="30" font-family = "Courier" >Rejected models</text>' >> $accepted_logo_filename
+cat $rejected_logo_filename >> $accepted_logo_filename
+echo '</g>' >> $accepted_logo_filename
+
+# CLOSES SVG FILE, DELETES TMP FILES
+echo '</svg>' >> $accepted_logo_filename
+rm $rejected_logo_filename
+rm ${12}.tmp
+rm ${12}.tmp.txt
+rm -f ${12}_similarity.tmp
+#rm *seeds.tmp
