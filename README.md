@@ -1,7 +1,7 @@
 # SELEXpipe
 
-SELEXpipe is a SELEX sequencing analysis pipeline by Tushar Warrier. It turns
-paired-end HT-SELEX reads into fixed-width sequence libraries and runs motif
+SELEXpipe is a SELEX sequencing analysis pipeline. It turns
+paired-end HT-SELEX & NCAP-SELEX reads into fixed-width sequence libraries and runs motif
 discovery on those libraries.
 
 Two stages are implemented:
