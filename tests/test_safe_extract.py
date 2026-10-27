@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Prove the default preprocess → motif path cannot inject synthetic sequence.
+"""Checks for the k-mer extract, the length filter, and the motif width guard.
 
-Contract:
+trim_to_kmer defaults:
   * an exact-length read emits one SEQ line of the requested width
   * a short read is dropped
   * default output contains no random ATCG padding
+
+filter_by_length.py (the shipped script):
+  * drops reads outside the input-length window
+  * pads shorter in-window reads and trims longer ones to the target
+  * --seed makes that padding repeatable
 """
 
 from __future__ import annotations
@@ -132,76 +137,183 @@ class TestTrimToKmerDefault(unittest.TestCase):
             self.assertEqual(read_seq_lines(seq_out), [LIG147_SEQ[:40]])
 
 
-class TestFilterByLengthDefault(unittest.TestCase):
-    def test_exact_kept_short_dropped_no_pad(self) -> None:
+def read_fasta_seqs(path: Path) -> list[str]:
+    from Bio import SeqIO
+
+    with path.open() as handle:
+        return [str(rec.seq) for rec in SeqIO.parse(handle, "fasta")]
+
+
+class TestFilterByLength(unittest.TestCase):
+    def test_window_keeps_bounds_and_drops_outside(self) -> None:
+        inside_short = "A" * 145
+        exact = "C" * 154
+        inside_long = "G" * 163
+        too_short = "T" * 144
+        too_long = "A" * 164
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             fasta = tmp_path / "in.fa"
             out = tmp_path / "out.fa"
             write_fasta(
                 fasta,
-                [("exact", LIG147_SEQ), ("short", SHORT_SEQ), ("long", LIG147_SEQ + "TTTT")],
+                [
+                    ("too_short", too_short),
+                    ("inside_short", inside_short),
+                    ("exact", exact),
+                    ("inside_long", inside_long),
+                    ("too_long", too_long),
+                ],
             )
             stats = filter_by_length.normalize_fasta_to_fixed_length(
                 str(fasta),
                 str(out),
-                target_length=101,
-                min_input_len=101,
-                max_input_len=101,
+                target_length=154,
+                min_input_len=145,
+                max_input_len=163,
             )
-            from Bio import SeqIO
-
-            with out.open() as handle:
-                kept = [str(rec.seq) for rec in SeqIO.parse(handle, "fasta")]
-            self.assertEqual(stats["kept"], 1)
-            self.assertEqual(stats["padded"], 0)
+            kept = read_fasta_seqs(out)
+            self.assertEqual(stats["total"], 5)
             self.assertEqual(stats["discarded"], 2)
-            self.assertEqual(kept, [LIG147_SEQ])
+            self.assertEqual(stats["kept"], 3)
+            self.assertEqual(stats["padded"], 1)
+            self.assertEqual(stats["trimmed"], 1)
+            self.assertEqual(len(kept), 3)
+            self.assertTrue(all(len(seq) == 154 for seq in kept))
+            self.assertTrue(kept[0].startswith(inside_short))
+            self.assertEqual(kept[1], exact)
+            self.assertEqual(kept[2], inside_long[:154])
 
-    def test_open_window_without_allow_pad_still_drops_shorts(self) -> None:
+    def test_padding_appends_random_bases(self) -> None:
+        original = "A" * 150
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             fasta = tmp_path / "in.fa"
             out = tmp_path / "out.fa"
-            write_fasta(fasta, [("short", SHORT_SEQ), ("exact", LIG147_SEQ)])
+            write_fasta(fasta, [("short_in_window", original)])
             stats = filter_by_length.normalize_fasta_to_fixed_length(
-                str(fasta),
-                str(out),
-                target_length=101,
-                min_input_len=1,
-                max_input_len=101,
+                str(fasta), str(out), target_length=154, min_input_len=145, max_input_len=163
             )
-            self.assertEqual(stats["padded"], 0)
-            self.assertEqual(stats["kept"], 1)
-            self.assertEqual(stats["discarded"], 1)
+            kept = read_fasta_seqs(out)
+            self.assertEqual(stats["padded"], 1)
+            self.assertEqual(stats["trimmed"], 0)
+            self.assertEqual(len(kept), 1)
+            self.assertEqual(len(kept[0]), 154)
+            self.assertTrue(kept[0].startswith(original))
+            self.assertTrue(set(kept[0][150:]).issubset(set("ATCG")))
 
-    def test_allow_pad_requires_seed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
+    def test_trim_right_left_and_center(self) -> None:
+        original = "ACGT" * 40  # 160 bp
+        self.assertEqual(len(original), 160)
+        modes = {
+            "right": original[:154],
+            "left": original[-154:],
+            "center": original[3:157],  # extra = 6, left trim = 3
+        }
+        for mode, expected in modes.items():
+            with self.subTest(mode=mode):
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_path = Path(tmp)
+                    fasta = tmp_path / "in.fa"
+                    out = tmp_path / "out.fa"
+                    write_fasta(fasta, [("long", original)])
+                    stats = filter_by_length.normalize_fasta_to_fixed_length(
+                        str(fasta),
+                        str(out),
+                        target_length=154,
+                        min_input_len=145,
+                        max_input_len=163,
+                        trim_from=mode,
+                    )
+                    kept = read_fasta_seqs(out)
+                    self.assertEqual(stats["trimmed"], 1)
+                    self.assertEqual(stats["padded"], 0)
+                    self.assertEqual(kept, [expected])
+                    self.assertEqual(len(expected), 154)
+
+    def test_seed_reproducible_via_cli(self) -> None:
+        script = ROOT / "scripts" / "01_preprocess" / "filter_by_length.py"
+        original = "A" * 150
+
+        def run(seed: str, out_name: str, tmp_path: Path) -> str:
             fasta = tmp_path / "in.fa"
-            out = tmp_path / "out.fa"
-            write_fasta(fasta, [("short", SHORT_SEQ)])
-            with self.assertRaises(ValueError):
-                filter_by_length.normalize_fasta_to_fixed_length(
+            out = tmp_path / out_name
+            write_fasta(fasta, [("short_in_window", original)])
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
                     str(fasta),
                     str(out),
-                    target_length=101,
-                    min_input_len=1,
-                    max_input_len=101,
-                    allow_pad=True,
-                    seed=None,
-                )
+                    "--target_length",
+                    "154",
+                    "--min_input_len",
+                    "145",
+                    "--max_input_len",
+                    "163",
+                    "--seed",
+                    seed,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("[OK] Reads padded:", proc.stdout)
+            self.assertIn("[OK] Reads dropped:", proc.stdout)
+            seqs = read_fasta_seqs(out)
+            self.assertEqual(len(seqs), 1)
+            self.assertTrue(seqs[0].startswith(original))
+            self.assertEqual(len(seqs[0]), 154)
+            return seqs[0]
 
-    def test_ligand_lengths_and_flank_delta_unchanged(self) -> None:
-        self.assertEqual(
-            filter_by_length.LIGAND_LENGTHS,
-            {"lig147": 101, "lig200": 154, "ligN40": 187, "ligN70": 247},
-        )
-        self.assertEqual(
-            filter_by_length.LIGAND_LENGTHS["ligN70"] - filter_by_length.LIGAND_LENGTHS["ligN40"],
-            60,
-        )
-        self.assertIn("flanks", filter_by_length.LIGAND_FLANK_NOTE.lower())
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            first = run("1", "a.fa", tmp_path)
+            second = run("1", "b.fa", tmp_path)
+            other = run("2", "c.fa", tmp_path)
+            self.assertEqual(first, second)
+            self.assertNotEqual(first, other)
+
+    def test_filtered_154_read_yields_one_40mer(self) -> None:
+        # 150 bp inside the default window. Padding is on the right, so the
+        # default 40-mer is the original 5' end, then one line from trim_to_kmer.
+        original = ("A" * 40) + ("C" * 110)
+        self.assertEqual(len(original), 150)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fasta = tmp_path / "in.fa"
+            filtered = tmp_path / "out.fa"
+            seq_out = tmp_path / "out.seq"
+            write_fasta(fasta, [("lig200ish", original)])
+            stats = filter_by_length.normalize_fasta_to_fixed_length(
+                str(fasta),
+                str(filtered),
+                target_length=154,
+                min_input_len=145,
+                max_input_len=163,
+            )
+            self.assertEqual(stats["kept"], 1)
+            kept = read_fasta_seqs(filtered)
+            self.assertEqual(len(kept[0]), 154)
+            kmer_stats = trim_to_kmer.trim_to_kmers(filtered, seq_out, kmer_size=40)
+            lines = read_seq_lines(seq_out)
+            self.assertEqual(kmer_stats["written"], 1)
+            self.assertEqual(kmer_stats["padded"], 0)
+            self.assertEqual(kmer_stats["dropped"], 0)
+            self.assertEqual(lines, [original[:40]])
+
+
+class TestLigandWindowAssumption(unittest.TestCase):
+    def test_driver_maps_ligand_lengths_with_nine_bp_window(self) -> None:
+        text = (ROOT / "scripts" / "01_preprocess" / "run_preprocess.sh").read_text(encoding="utf-8")
+        self.assertIn("lig147) echo 101", text)
+        self.assertIn("lig200) echo 154", text)
+        self.assertIn("ligN40) echo 187", text)
+        self.assertIn("ligN70) echo 247", text)
+        self.assertIn("TARGET_LEN - 9", text)
+        self.assertIn("TARGET_LEN + 9", text)
+        self.assertNotIn("--ligand", text.split("FILTER_ARGS=", 1)[-1])
 
 
 class TestMotifDriverWidthGuard(unittest.TestCase):

@@ -1,7 +1,9 @@
 # Reference copy of ligand-design expected merged lengths.
-# The scripts do not read this file. The same numbers are hard-coded in:
-#   scripts/01_preprocess/filter_by_length.py  (LIGAND_LENGTHS)
-#   scripts/01_preprocess/run_preprocess.sh    (ligand_length)
+# The scripts do not read this file. Lengths are hard-coded in
+# scripts/01_preprocess/run_preprocess.sh (ligand_length).
+# filter_by_length.py has no ligand names. The driver maps a design to
+# --target_length and, unless you set the bounds, a window of target±9
+# (145–163 when the target is lig200 / 154).
 # ligN40 and ligN70 use different constant flanks. The 60 bp gap is expected.
 design	merged_length_bp	notes
 lig147	101	

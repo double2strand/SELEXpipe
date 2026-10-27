@@ -6,7 +6,7 @@ discovery on those libraries.
 
 Two stages are implemented:
 
-1. **Preprocessing** — adapter-aware paired-end merge, exact-length filtering, and one k-mer per molecule (default 40 bp). Short reads are dropped. Random bases are written only if you pass `--allow-pad` and `--seed`.
+1. **Preprocessing** — adapter-aware paired-end merge with [fastp](https://github.com/opengene/fastp), a length-window filter that pads or trims reads to a target length, and one k-mer per molecule (default 40 bp). The k-mer step drops a short window unless you pass `--allow-pad` and `--seed`.
 2. **Motif discovery** — `totalautomodelIC` (v0.22) with the external `spacek40` binary. The driver refuses a SEQ file that is empty or whose lines are not all the expected width.
 
 Enrichment filtering beyond length, library reformatting, motif-position matching, and mutual-information analysis are described as later stages. They have no scripts in this repository.
@@ -16,10 +16,10 @@ Enrichment filtering beyond length, library reformatting, motif-position matchin
 ```mermaid
 flowchart TD
   raw["Lane FASTQs<br/>SAMPLE_L1/L2 _R1/R2 .fastq.gz"]
-  fastp["fastp per lane<br/>quality, adapters, PE merge"]
+  fastp["fastp per lane<br/>https://github.com/opengene/fastp"]
   cat["Concatenate lanes<br/>and decompress a copy"]
   fasta["seqtk seq -a<br/>FASTQ to FASTA"]
-  filt["filter_by_length.py<br/>exact merged length"]
+  filt["filter_by_length.py<br/>window, then pad or trim"]
   kmer["trim_to_kmer.py<br/>one window per read, default 40 bp"]
   motif["run_motif.sh<br/>totalautomodelIC + spacek40"]
   logos["PREFIX_logos.svg<br/>PFMs and seed lists"]
@@ -27,7 +27,7 @@ flowchart TD
   raw --> fastp --> cat --> fasta --> filt --> kmer --> motif --> logos
 ```
 
-`scripts/01_preprocess/run_preprocess.sh` runs everything from `fastp` through the k-mer extract. `scripts/02_motif/run_motif.sh` runs motif discovery. Background and signal SEQ files are produced by running preprocessing on each library, then passed in as `--background` and `--signal`.
+`scripts/01_preprocess/run_preprocess.sh` runs everything from [fastp](https://github.com/opengene/fastp) through the k-mer extract. `scripts/02_motif/run_motif.sh` runs motif discovery. Background and signal SEQ files are produced by running preprocessing on each library, then passed in as `--background` and `--signal`.
 
 ## Directory layout
 
@@ -55,7 +55,7 @@ SELEXpipe/
 │       ├── run_motif.sh            # driver; checks SEQ line width
 │       └── totalautomodelIC        # upstream recipe, unmodified
 └── tests/
-    └── test_safe_extract.py        # exact-length, drop-short, no-pad, width guard
+    └── test_safe_extract.py        # k-mer extract, length window, motif width guard
 ```
 
 ## Requirements
@@ -64,15 +64,17 @@ SELEXpipe/
 |------|---------|----------------|
 | Python ≥ 3.9 | length filter, k-mer extract, SEQ width check | conda or system |
 | Biopython ≥ 1.81 | `filter_by_length.py` | `envs/requirements.txt` or conda |
-| fastp | lane merge | bioconda (`envs/environment.yml`) |
+| [fastp](https://github.com/opengene/fastp) | lane merge | [install from the fastp repo](https://github.com/opengene/fastp), or bioconda (`envs/environment.yml`) |
 | seqtk | FASTQ → FASTA | bioconda |
 | bash, gzip, cat | preprocessing driver | system |
 | bc, awk, sed, grep | `totalautomodelIC` | system (`bc` is also in the conda env) |
 | spacek40 | motif discovery | not shipped; no download URL is recorded here |
 
-`fastp` and `seqtk` versions were not pinned in the original scripts, so `environment.yml` does not pin them either.
+[fastp](https://github.com/opengene/fastp) and `seqtk` versions were not pinned in the original scripts, so `environment.yml` does not pin them either.
 
 ### Installation
+
+[fastp](https://github.com/opengene/fastp) is the paired-end merge and adapter trimmer. Install it from that repository, or let conda install the bioconda package when you create the environment below.
 
 Conda (preprocessing and motif shell tools, except `spacek40`):
 
@@ -91,16 +93,18 @@ Place the `spacek40` binary in `scripts/02_motif/` or pass `--bin-dir`. The moti
 
 ## Ligand lengths
 
-These are merged construct lengths. ligN40 and ligN70 use different constant flanks, so the gap is 60 bp. The same table is hard-coded in `filter_by_length.py` and `run_preprocess.sh`. `config/ligands.tsv` repeats it for reference and is not read by the scripts.
+These are merged construct lengths. ligN40 and ligN70 use different constant flanks, so the gap is 60 bp. The lengths are hard-coded in `run_preprocess.sh` (`ligand_length`). `filter_by_length.py` does not know ligand names. `config/ligands.tsv` repeats the table for reference and is not read by the scripts.
 
-| Ligand design | Expected merged length |
-|---------------|------------------------|
-| lig147        | 101 bp                 |
-| lig200        | 154 bp                 |
-| ligN40        | 187 bp                 |
-| ligN70        | 247 bp                 |
+| Ligand design | Expected merged length | Driver window if you omit min/max |
+|---------------|------------------------|-----------------------------------|
+| lig147        | 101 bp                 | 92–110                            |
+| lig200        | 154 bp                 | 145–163 (the filter script's own defaults) |
+| ligN40        | 187 bp                 | 178–196                           |
+| ligN70        | 247 bp                 | 238–256                           |
 
-Pass exactly one of `--ligand` or `--target-length`. There is no numeric default.
+Pass exactly one of `--ligand` or `--target-length`. There is no numeric default on the driver.
+
+**Assumption.** `filter_by_length.py`'s built-in window is 145–163 around a target of 154 (lig200). When `run_preprocess.sh` is not given `--min-input-len` / `--max-input-len`, it uses that same ±9 bp tolerance for whatever target you set. The other designs were not given their own measured windows. Pass either bound yourself to override it. The driver then calls the filter with positional `input_fasta` and `output_fasta` plus `--target_length`, `--min_input_len`, `--max_input_len`, `--trim_from`, and `--seed` when a seed was set. It does not pass `--ligand` or `--allow-pad` to the filter.
 
 ## Usage
 
@@ -121,23 +125,25 @@ The adapter FASTA is a separate argument (for example `Adapters_TruSeq3PE.fa`). 
 scripts/01_preprocess/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
-  --ligand lig147 \
+  --ligand lig200 \
   --input-dir ./raw \
   --output-dir ./processed
 ```
 
-Outputs under `processed/SAMPLE/`:
+That lig200 run is the filter's own defaults: keep 145–163 bp, write 154 bp reads. `--seed 1` makes the padding repeatable. A lig147 run uses target 101 and window 92–110 unless you set the bounds.
+
+Outputs under `processed/SAMPLE/` for lig200:
 
 | File | Step |
 |------|------|
-| `SAMPLE_L1.fq.gz`, `SAMPLE_L1.json`, `SAMPLE_L1.html` | fastp, lane 1 |
-| `SAMPLE_L2.fq.gz`, `SAMPLE_L2.json`, `SAMPLE_L2.html` | fastp, lane 2 |
+| `SAMPLE_L1.fq.gz`, `SAMPLE_L1.json`, `SAMPLE_L1.html` | [fastp](https://github.com/opengene/fastp), lane 1 |
+| `SAMPLE_L2.fq.gz`, `SAMPLE_L2.json`, `SAMPLE_L2.html` | [fastp](https://github.com/opengene/fastp), lane 2 |
 | `SAMPLE.fq.gz`, `SAMPLE.fq` | concatenated lanes; gzipped file is kept |
 | `SAMPLE.fa` | seqtk FASTA |
-| `SAMPLE_101.fa` | reads kept at the ligand length (101 for lig147) |
-| `SAMPLE_101.seq` | one 40 bp line per kept read |
+| `SAMPLE_154.fa` | reads inside the window, padded or trimmed to 154 bp |
+| `SAMPLE_154.seq` | one 40 bp line per kept read |
 
-`--skip-fastp` resumes from the lane-merged gzip files. `--kmer-start` or `--center-kmer` moves the extracted window. `--allow-pad --seed N` is the only way to add random ATCG. Details and the fastp flag table are in [`docs/preprocessing.md`](docs/preprocessing.md).
+`--skip-fastp` resumes from the lane-merged gzip files. `--kmer-start` or `--center-kmer` moves the extracted window. `--allow-pad --seed N` pads only a short k-mer window. The length filter pads on its own. [fastp](https://github.com/opengene/fastp) flag defaults are in [`docs/preprocessing.md`](docs/preprocessing.md).
 
 ```bash
 scripts/01_preprocess/run_preprocess.sh --help
@@ -145,13 +151,17 @@ scripts/01_preprocess/run_preprocess.sh --help
 
 ### 1b. Length filter and k-mer extract on the synthetic example
 
-These two commands do not need `fastp`, `seqtk`, or real FASTQs. From the repository root:
+These two commands do not need [fastp](https://github.com/opengene/fastp), `seqtk`, or real FASTQs. From the repository root:
+
+The synthetic file is 8 bp, 101 bp, and 105 bp. The filter's default window (145–163) drops all three records. Pin the window to the lig147 length to keep the 101 bp read:
 
 ```bash
 python3 scripts/01_preprocess/filter_by_length.py \
   data/examples/lig147_synthetic.fa \
   /tmp/SAMPLE_101.fa \
-  --ligand lig147
+  --target_length 101 \
+  --min_input_len 101 \
+  --max_input_len 101
 
 python3 scripts/01_preprocess/trim_to_kmer.py \
   /tmp/SAMPLE_101.fa \
@@ -159,7 +169,43 @@ python3 scripts/01_preprocess/trim_to_kmer.py \
   --kmer-size 40
 ```
 
-The filter keeps the single 101 bp record. The SEQ file is one line of 40 `A`s. The 8 bp and 105 bp records are dropped.
+The filter keeps the single 101 bp record and does not pad it, because it is already the target length. The SEQ file is one line of 40 `A`s. The 8 bp and 105 bp records are outside the window and are dropped.
+
+### `filter_by_length.py` options
+
+The script keeps reads inside `[--min_input_len, --max_input_len]`, then makes every kept read exactly `--target_length`. Shorter reads gain random A/T/C/G on the right. Longer reads are trimmed. Reads outside the window are dropped.
+
+| Argument | Default | Role |
+|----------|---------|------|
+| `input_fasta` | required positional | Input FASTA |
+| `output_fasta` | required positional | Output FASTA |
+| `--target_length` | 154 | Length of every kept read |
+| `--min_input_len` | 145 | Shortest input read to keep |
+| `--max_input_len` | 163 | Longest input read to keep |
+| `--trim_from` | `right` | `right`, `left`, or `center` |
+| `--seed` | none | Seeds padding. Omit it for an unseeded draw |
+
+```bash
+python3 scripts/01_preprocess/filter_by_length.py \
+  input.fa output_154.fa \
+  --target_length 154 \
+  --min_input_len 145 \
+  --max_input_len 163 \
+  --trim_from right \
+  --seed 1
+```
+
+It prints these stats (the spaces after each colon match the script):
+
+```text
+[OK] Total reads:     N
+[OK] Reads kept:     N
+[OK] Reads padded:   N
+[OK] Reads trimmed:  N
+[OK] Reads dropped:  N
+```
+
+A kept read is exactly the target length. lig200 output is 154 bp, which is longer than the default 40-mer, so `trim_to_kmer.py` still writes one line per read and does not pad. Filter padding is on the right, so a 5′ 40-mer (`--kmer-start 0`) comes from the original read when that read was at least 40 bp. The default windows above all sit above 40 bp.
 
 ### 2. Motif discovery
 
@@ -198,7 +244,7 @@ python3 -m pip install -r envs/requirements.txt
 python3 -m unittest discover -s tests -v
 ```
 
-The tests check that an exact-length read yields one window of the requested width, that a short read is dropped, that the default path writes no random bases, and that the motif driver rejects a SEQ line of the wrong width before it looks for `spacek40`.
+The tests check that an exact-length read yields one k-mer of the requested width, that the k-mer step drops a short read and writes no random bases by default, that the length filter applies the window and the three trim modes, that `--seed` repeats padding, that a 154 bp filtered read still yields one 40-mer, and that the motif driver rejects a SEQ line of the wrong width before it looks for `spacek40`.
 
 ## License
 

@@ -6,9 +6,10 @@ Paths below are relative to the repository root. Scripts live in
 This module converts raw paired-end SELEX FASTQ reads into analysis-ready
 fixed-width SEQ files for motif discovery.
 
-**Default contract (safe):** one variable-region extract per molecule, exact-length
-merged-read filter, short reads dropped, **no random ATCG** in motif input.
-Padding exists only behind `--allow-pad` (requires `--seed`).
+**Default contract:** one variable-region extract per molecule. The length filter
+keeps an input-length window and normalizes every kept read to the target by
+padding (random A/T/C/G on the right) or trimming. The k-mer step still drops a
+short window unless `--allow-pad` and `--seed` are set.
 
 ## What it does
 
@@ -18,8 +19,8 @@ For each sample (two sequencing lanes, paired-end):
 2. **Lane concatenation** — concatenate the two lane-merged gzipped FASTQ files into one sample-level FASTQ.gz.
 3. **Decompress** — write an uncompressed FASTQ **copy** with `gzip -d -f -c` (the `.fq.gz` is kept). Do not use in-place `gzip -d` here.
 4. **FASTQ → FASTA (`seqtk`)** — convert the combined FASTQ to FASTA.
-5. **Length filter (`filter_by_length.py`)** — keep reads whose length equals `--target_length` (or the length implied by `--ligand`). Shorts are dropped. Opening `--min-input-len` / `--max-input-len` still does **not** pad unless `--allow-pad` is set.
-6. **One-window extract (`trim_to_kmer.py`)** — write **one** SEQ line per retained molecule (`--start` or `--center`, default **40 bp**). Short windows are dropped. This is not a tiled 40-mer library.
+5. **Length filter (`filter_by_length.py`)** — keep reads inside `[--min_input_len, --max_input_len]`, then pad or trim them to `--target_length`. See the options table below. The script has no `--ligand` flag.
+6. **One-window extract (`trim_to_kmer.py`)** — write **one** SEQ line per retained molecule (`--start` or `--center`, default **40 bp**). Short windows are dropped. This is not a tiled 40-mer library. A 154 bp filtered read is long enough for that 40-mer, so this step does not pad.
 
 ## Ligand design expected lengths
 
@@ -36,7 +37,14 @@ These are **merged construct** lengths. They are correct; do not "fix" them.
 merged-length delta is **60 bp, not 30 bp**. That is expected (N-region 40 vs 70
 plus different flanks). Do not change 187 / 247 to force a 30 bp gap.
 
-Use `--ligand lig147` (etc.) as a shorthand for the corresponding `--target-length`, or pass an explicit length when needed.
+`run_preprocess.sh` accepts `--ligand` or `--target-length` and maps a ligand design onto `--target_length` for `filter_by_length.py`. If you omit the input window, the driver uses target±9 bp. That matches the filter script's own defaults for lig200 (target 154, window 145–163). The same ±9 bp tolerance is applied to the other designs; those windows were not measured separately. Set `--min-input-len` or `--max-input-len` to override.
+
+| Ligand design | Target | Window used by the driver |
+|---------------|--------|---------------------------|
+| lig147        | 101    | 92–110                    |
+| lig200        | 154    | 145–163                   |
+| ligN40        | 187    | 178–196                   |
+| ligN70        | 247    | 238–256                   |
 
 ## Generic naming convention
 
@@ -49,7 +57,7 @@ Replace experiment-specific IDs with a sample prefix `SAMPLE`. Expected inputs u
 | Lane 2, read 1 | `{SAMPLE}_L2_R1.fastq.gz` |
 | Lane 2, read 2 | `{SAMPLE}_L2_R2.fastq.gz` |
 
-Outputs written under `--output-dir/{SAMPLE}/` (example with lig147 / 101 bp):
+Outputs written under `--output-dir/{SAMPLE}/` (example with lig200 / 154 bp):
 
 | Stage | Filename |
 |-------|----------|
@@ -66,7 +74,7 @@ Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`). None is shi
 
 ## Dependencies
 
-- [`fastp`](https://github.com/OpenGene/fastp)
+- [`fastp`](https://github.com/opengene/fastp)
 - [`seqtk`](https://github.com/lh3/seqtk)
 - `gzip`, `bash`, `python3` (≥ 3.9 recommended)
 - [Biopython](https://biopython.org/) (`pip install -r envs/requirements.txt`)
@@ -77,27 +85,13 @@ Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`). None is shi
 scripts/01_preprocess/run_preprocess.sh \
   --sample SAMPLE \
   --adapter-fasta ./Adapters_TruSeq3PE.fa \
-  --ligand lig147 \
-  --input-dir ./raw \
-  --output-dir ./processed
-```
-
-Provide exactly one of `--ligand` or `--target-length` (no hard-coded default such as 154 or 101). The default retention window is exact (`min = max = target`). To extract a window that is not the leftmost k bases, pass `--kmer-start` (skip a 5′ flank) or `--center-kmer`.
-
-Opt-in padding (not the default; requires a seed):
-
-```bash
-scripts/01_preprocess/run_preprocess.sh \
-  --sample SAMPLE \
-  --adapter-fasta ./Adapters_TruSeq3PE.fa \
   --ligand lig200 \
-  --min-input-len 145 \
-  --max-input-len 163 \
-  --allow-pad \
   --seed 1 \
   --input-dir ./raw \
   --output-dir ./processed
 ```
+
+Provide exactly one of `--ligand` or `--target-length`. The driver has no numeric default. With the window omitted, lig200 is target 154 and window 145–163, which is what `filter_by_length.py` does on its own. `--seed` is forwarded to the length filter so its padding repeats. `--allow-pad` is only for a short k-mer window and still requires `--seed`. To extract a k-mer that is not the leftmost k bases, pass `--kmer-start` or `--center-kmer`.
 
 Equivalent standalone steps (mirroring the driver; generic names):
 
@@ -121,34 +115,58 @@ fastp -q 10 \
 cat SAMPLE_L1.fq.gz SAMPLE_L2.fq.gz > SAMPLE.fq.gz
 gzip -d -f -c SAMPLE.fq.gz > SAMPLE.fq
 seqtk seq -a SAMPLE.fq > SAMPLE.fa
-python3 scripts/01_preprocess/filter_by_length.py SAMPLE.fa SAMPLE_101.fa --ligand lig147
-python3 scripts/01_preprocess/trim_to_kmer.py SAMPLE_101.fa SAMPLE_101.seq --kmer-size 40
+python3 scripts/01_preprocess/filter_by_length.py SAMPLE.fa SAMPLE_154.fa \
+  --target_length 154 \
+  --min_input_len 145 \
+  --max_input_len 163 \
+  --trim_from right \
+  --seed 1
+python3 scripts/01_preprocess/trim_to_kmer.py SAMPLE_154.fa SAMPLE_154.seq --kmer-size 40
+```
+
+The 154 bp FASTA is a valid input to `trim_to_kmer.py`. The default 40-mer is the first 40 bases of each read. Filter padding sits on the right, so that 40-mer is original sequence when the retained read was at least 40 bp.
+
+### `filter_by_length.py` options
+
+| Argument | Default | Role |
+|----------|---------|------|
+| `input_fasta` | required positional | Input FASTA |
+| `output_fasta` | required positional | Output FASTA |
+| `--target_length` | 154 | Length of every kept read |
+| `--min_input_len` | 145 | Shortest input read to keep |
+| `--max_input_len` | 163 | Longest input read to keep |
+| `--trim_from` | `right` | `right`, `left`, or `center` |
+| `--seed` | none | Seeds padding. Omit it for an unseeded draw |
+
+Reads shorter than the minimum or longer than the maximum are dropped. A kept read shorter than the target is padded on the right with random A/T/C/G. A kept read longer than the target is trimmed from the side named by `--trim_from`. `center` drops half of the extra bases from the left (`extra // 2`) and keeps the next `target_length` bases.
+
+```bash
+python3 scripts/01_preprocess/filter_by_length.py \
+  input.fa output_154.fa \
+  --target_length 154 \
+  --min_input_len 145 \
+  --max_input_len 163 \
+  --trim_from right \
+  --seed 1
+```
+
+Stats printed by the script:
+
+```text
+[OK] Total reads:     N
+[OK] Reads kept:     N
+[OK] Reads padded:   N
+[OK] Reads trimmed:  N
+[OK] Reads dropped:  N
 ```
 
 ### Helper scripts
 
-`filter_by_length.py` keeps FASTA records at a resolved target length. Provide either `--target_length` or `--ligand` (mutually exclusive; no hard-coded default). If `--min_input_len` / `--max_input_len` are omitted, both default to the target (exact-length retention). Shorts are **dropped**. Random ATCG padding happens only with `--allow-pad --seed`. Longer reads in an opened window are trimmed (`--trim_from right|left|center`).
-
 `trim_to_kmer.py` writes **one** SEQ line per record. `--length` is accepted as an alias for `--kmer-size`. There is no chunk/tile mode.
 
 ```bash
-# Exact-length filter via ligand design key
-python3 scripts/01_preprocess/filter_by_length.py input.fa output_101.fa --ligand lig147
-
-# Or set an explicit length
-python3 scripts/01_preprocess/filter_by_length.py input.fa output_154.fa --target_length 154
-
-# Windowed retention; shorts still dropped unless --allow-pad --seed
-python3 scripts/01_preprocess/filter_by_length.py input.fa output_154.fa \
-  --ligand lig200 \
-  --min_input_len 145 \
-  --max_input_len 163 \
-  --trim_from right \
-  --allow-pad \
-  --seed 1
-
 # One 40-base window per read (default: start=0). Shorts dropped, no padding.
-python3 scripts/01_preprocess/trim_to_kmer.py input_101.fa output.seq --kmer-size 40
+python3 scripts/01_preprocess/trim_to_kmer.py input_154.fa output.seq --kmer-size 40
 
 # Centered window
 python3 scripts/01_preprocess/trim_to_kmer.py input_101.fa output.seq --kmer-size 40 --center

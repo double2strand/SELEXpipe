@@ -5,10 +5,18 @@
 #   1. fastp: quality/adapter trim + merge paired-end reads (per lane)
 #   2. concatenate lane-merged FASTQ.gz files
 #   3. decompress (keep .fq.gz) and convert FASTQ -> FASTA (seqtk)
-#   4. filter FASTA to exact merged-read length (drop shorts; no padding)
+#   4. filter FASTA by an input-length window, then pad or trim to the target
 #   5. extract one fixed-width window per molecule (default 40-mer)
 #
-# Default path never writes random ATCG. Padding is opt-in (--allow-pad + --seed).
+# filter_by_length.py always pads in-window reads that are shorter than the
+# target (random ATCG on the right) and trims longer ones. That padding is
+# not gated by --allow-pad. The k-mer step still drops a short window unless
+# --allow-pad and --seed are both set.
+#
+# Window assumption: when --min-input-len / --max-input-len are omitted, the
+# driver uses target±9 bp. That is this filter's own default window (145–163)
+# around its default target (154, lig200). Other ligand designs get the same
+# absolute tolerance; those windows were not measured separately.
 #
 # Expected per-sample lane inputs (under --input-dir):
 #   ${SAMPLE}_L1_R1.fastq.gz  ${SAMPLE}_L1_R2.fastq.gz
@@ -68,10 +76,12 @@ Usage: run_preprocess.sh --sample SAMPLE --adapter-fasta ADAPTERS.fa \
 Required:
   --sample NAME              Sample prefix (generic; replaces experiment-specific IDs)
   --adapter-fasta PATH       Adapter FASTA for fastp (e.g. Adapters_TruSeq3PE.fa)
-  --target-length N          Exact merged-read length for filter_by_length.py
-  --ligand DESIGN            Ligand design key (sets target length; see table below)
+  --target-length N          Final read length passed to filter_by_length.py
+  --ligand DESIGN            Ligand design key (sets --target_length; see table)
 
   Provide exactly one of --target-length or --ligand.
+  The filter script has no --ligand flag. This driver maps the design to a
+  target length, then calls filter_by_length.py with positional FASTA paths.
 
 Ligand design expected merged lengths (do not "correct"):
   lig147  101 bp
@@ -84,25 +94,30 @@ Ligand design expected merged lengths (do not "correct"):
 Optional:
   --input-dir DIR            Directory containing lane FASTQ.gz files (default: .)
   --output-dir DIR           Directory for outputs (default: .); writes into DIR/SAMPLE/
-  --min-input-len N          Min input length to retain (default: same as target length)
-  --max-input-len N          Max input length to retain (default: same as target length)
+  --min-input-len N          Min input length to retain (default: target length - 9)
+  --max-input-len N          Max input length to retain (default: target length + 9)
   --trim-from MODE           right|left|center trim for long reads (default: right)
   --kmer-size K              One SEQ line / k-mer per molecule (default: 40)
   --kmer-start S             0-based start of the extract window (default: 0)
   --center-kmer              Center the extract window instead of --kmer-start
-  --allow-pad                Opt-in: pad short reads/windows with random ATCG
-  --seed N                   RNG seed (required if --allow-pad is set)
+  --allow-pad                Pad a short k-mer window only (not the length filter)
+  --seed N                   RNG seed for filter padding, and for k-mer padding
+                             when --allow-pad is set
   --threads N                Threads hint for fastp (default: nproc)
   --skip-fastp               Resume from existing lane-merged FASTQ.gz outputs
   -h, --help                 Show this help
 
-Default path: exact-length filter, one window per read, drop shorts, no padding.
+Length filter: keep reads in [target-9, target+9] unless a bound is set,
+then pad or trim to the target. lig200 (154 bp) is 145–163, the same window
+as filter_by_length.py's own defaults. K-mer extract: one window per kept
+read. A 154 bp read is long enough for the default 40-mer, so that step
+does not pad.
 
 Example:
   scripts/01_preprocess/run_preprocess.sh \
       --sample SAMPLE \
       --adapter-fasta ./Adapters_TruSeq3PE.fa \
-      --ligand lig147 \
+      --ligand lig200 \
       --input-dir ./raw \
       --output-dir ./processed
 EOF
@@ -162,13 +177,35 @@ elif [[ -z "$TARGET_LEN" ]]; then
   die "provide --target-length N or --ligand DESIGN"
 fi
 
+[[ "$TARGET_LEN" =~ ^[0-9]+$ ]] || die "--target-length must be a positive integer"
+if (( TARGET_LEN <= 0 )); then
+  die "--target-length must be a positive integer"
+fi
+
+# Same ±9 bp tolerance as filter_by_length.py's 145–163 window around 154.
+if [[ -z "$MIN_INPUT_LEN" ]]; then
+  MIN_INPUT_LEN=$((TARGET_LEN - 9))
+fi
+if [[ -z "$MAX_INPUT_LEN" ]]; then
+  MAX_INPUT_LEN=$((TARGET_LEN + 9))
+fi
+
+[[ "$MIN_INPUT_LEN" =~ ^[0-9]+$ ]] || die "--min-input-len must be a positive integer"
+[[ "$MAX_INPUT_LEN" =~ ^[0-9]+$ ]] || die "--max-input-len must be a positive integer"
+if (( MIN_INPUT_LEN <= 0 || MAX_INPUT_LEN <= 0 )); then
+  die "input length window must be positive (target±9 underflowed)"
+fi
+if (( MIN_INPUT_LEN > MAX_INPUT_LEN )); then
+  die "--min-input-len (${MIN_INPUT_LEN}) must be <= --max-input-len (${MAX_INPUT_LEN})"
+fi
+
 case "$TRIM_FROM" in
   right|left|center) ;;
   *) die "--trim-from must be one of: right, left, center" ;;
 esac
 
 if [[ "$ALLOW_PAD" -eq 1 && -z "$SEED" ]]; then
-  die "--allow-pad requires --seed so padding is reproducible"
+  die "--allow-pad requires --seed so k-mer padding is reproducible"
 fi
 
 require_cmd fastp
@@ -240,24 +277,24 @@ log "FASTQ -> FASTA (seqtk) -> $(basename "$FASTA")"
 seqtk seq -a "$COMBINED_FQ" > "$FASTA"
 
 if [[ -n "$LIGAND" ]]; then
-  log "filtering FASTA for ligand ${LIGAND} -> exact length ${TARGET_LEN} (filter_by_length.py)"
+  log "filtering FASTA for ligand ${LIGAND}: window ${MIN_INPUT_LEN}-${MAX_INPUT_LEN}, target ${TARGET_LEN}"
 else
-  log "filtering FASTA to exact length ${TARGET_LEN} (filter_by_length.py)"
+  log "filtering FASTA: window ${MIN_INPUT_LEN}-${MAX_INPUT_LEN}, target ${TARGET_LEN}"
+fi
+if (( MIN_INPUT_LEN > TARGET_LEN || MAX_INPUT_LEN < TARGET_LEN )); then
+  log "note: target ${TARGET_LEN} is outside ${MIN_INPUT_LEN}-${MAX_INPUT_LEN}; every kept read is padded or trimmed"
 fi
 FILTER_ARGS=(
   "$FASTA"
   "$FASTA_FILTERED"
+  --target_length "$TARGET_LEN"
+  --min_input_len "$MIN_INPUT_LEN"
+  --max_input_len "$MAX_INPUT_LEN"
   --trim_from "$TRIM_FROM"
 )
-if [[ -n "$LIGAND" ]]; then
-  FILTER_ARGS+=(--ligand "$LIGAND")
-else
-  FILTER_ARGS+=(--target_length "$TARGET_LEN")
-fi
-[[ -n "$MIN_INPUT_LEN" ]] && FILTER_ARGS+=(--min_input_len "$MIN_INPUT_LEN")
-[[ -n "$MAX_INPUT_LEN" ]] && FILTER_ARGS+=(--max_input_len "$MAX_INPUT_LEN")
-if [[ "$ALLOW_PAD" -eq 1 ]]; then
-  FILTER_ARGS+=(--allow-pad --seed "$SEED")
+# --seed is optional. Unset means the filter's unseeded padding.
+if [[ -n "$SEED" ]]; then
+  FILTER_ARGS+=(--seed "$SEED")
 fi
 python3 "${SCRIPT_DIR}/filter_by_length.py" "${FILTER_ARGS[@]}"
 
