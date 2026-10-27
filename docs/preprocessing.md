@@ -68,7 +68,7 @@ Outputs written under `--output-dir/{SAMPLE}/` (example with lig200 / 154 bp):
 | Length-filtered FASTA | `{SAMPLE}_{N}.fa` |
 | One k-mer per read (plain text) | `{SAMPLE}_{N}.seq` |
 
-Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`). None is shipped in this repository.
+`config/adapters.fa` is the default adapter FASTA. These are example adapters. If you use custom adapters, edit config/adapters.fa or pass your own file.
 
 `data/examples/lig147_synthetic.fa` is a three-record synthetic FASTA for the length filter and k-mer extract only. It is not a sequencing run.
 
@@ -84,14 +84,15 @@ Adapter FASTA is supplied separately (e.g. `Adapters_TruSeq3PE.fa`). None is shi
 ```bash
 scripts/01_preprocess/run_preprocess.sh \
   --sample SAMPLE \
-  --adapter-fasta ./Adapters_TruSeq3PE.fa \
   --ligand lig200 \
   --seed 1 \
   --input-dir ./raw \
   --output-dir ./processed
 ```
 
-Provide exactly one of `--ligand` or `--target-length`. The driver has no numeric default. With the window omitted, lig200 is target 154 and window 145–163, which is what `filter_by_length.py` does on its own. `--seed` is forwarded to the length filter so its padding repeats. `--allow-pad` is only for a short k-mer window and still requires `--seed`. To extract a k-mer that is not the leftmost k bases, pass `--kmer-start` or `--center-kmer`.
+The command above uses `config/adapters.fa`. These are example adapters. If you use custom adapters, edit config/adapters.fa or pass your own file.
+
+Provide exactly one of `--ligand` or `--target-length`. The driver has no numeric default. With the window omitted, lig200 is target 154 and window 145–163, which is what `filter_by_length.py` does on its own. `--seed` is forwarded to the length filter so its padding repeats. `--allow-pad` is only for a short k-mer window and still requires `--seed`. To extract a k-mer that is not the leftmost k bases, pass `--kmer-start` or `--center-kmer`. Pass `--adapter-fasta` to override the default adapters.
 
 Equivalent standalone steps (mirroring the driver; generic names):
 
@@ -99,7 +100,7 @@ Equivalent standalone steps (mirroring the driver; generic names):
 fastp -q 10 \
   --in1 SAMPLE_L1_R1.fastq.gz --in2 SAMPLE_L1_R2.fastq.gz \
   -m --merged_out SAMPLE_L1.fq.gz \
-  --adapter_fasta=./Adapters_TruSeq3PE.fa \
+  --adapter_fasta=config/adapters.fa \
   --json=./SAMPLE_L1.json --html=./SAMPLE_L1.html \
   --overlap_len_require=5 -gx --length_required=15 \
   --n_base_limit=10 -y --complexity_threshold=5
@@ -107,7 +108,7 @@ fastp -q 10 \
 fastp -q 10 \
   --in1 SAMPLE_L2_R1.fastq.gz --in2 SAMPLE_L2_R2.fastq.gz \
   -m --merged_out SAMPLE_L2.fq.gz \
-  --adapter_fasta=./Adapters_TruSeq3PE.fa \
+  --adapter_fasta=config/adapters.fa \
   --json=./SAMPLE_L2.json --html=./SAMPLE_L2.html \
   --overlap_len_require=5 -gx --length_required=15 \
   --n_base_limit=10 -y --complexity_threshold=5
@@ -181,7 +182,7 @@ python3 scripts/01_preprocess/trim_to_kmer.py input.fa output.seq --kmer-size 40
 |------|-------|------|
 | `-q` | 10 | Base quality threshold |
 | `-m` / `--merged_out` | — | Merge overlapping PE reads |
-| `--adapter_fasta` | user-supplied | Adapter sequences |
+| `--adapter_fasta` | `config/adapters.fa` | Example adapter sequences (override with your own file) |
 | `--overlap_len_require` | 5 | Minimum overlap for merging |
 | `-g` / `-x` | on | PolyG trimming / length filtering helpers as configured by fastp |
 | `--length_required` | 15 | Discard very short merges |

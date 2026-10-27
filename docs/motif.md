@@ -17,7 +17,7 @@ Given a background SEQ library and a signal (enriched) SEQ library:
 4. Refine accepted seeds (information content between 10 and 20 bits).
 5. Write accepted / unrefined / rejected models into an SVG logo file.
 
-The shipped `totalautomodelIC` script (`scripts/02_motif/totalautomodelIC`) is the established analysis recipe and is **not modified** in this repository. It must be run with `spacek40` available as `./spacek40` in the working directory (the driver handles this).
+The shipped `totalautomodelIC` script (`scripts/02_motif/totalautomodelIC`) is the established analysis recipe and is **not modified** in this repository. It calls `./spacek40` in the working directory. `run_motif.sh` symlinks the shipped binary `scripts/02_motif/spacek40` there. `--bin-dir` defaults to that directory.
 
 ## Generic naming
 
@@ -76,12 +76,12 @@ Defaults used by this pipeline (matching the original recipe):
 ## Dependencies
 
 - `totalautomodelIC` — included at `scripts/02_motif/totalautomodelIC` (bash; do not edit)
-- `spacek40` — external binary invoked as `./spacek40` by `totalautomodelIC`; place it in `scripts/02_motif/` (or pass `--bin-dir`). No download location is recorded in this repository.
+- `spacek40` — included at `scripts/02_motif/spacek40`. `totalautomodelIC` invokes it as `./spacek40`. The driver symlinks this copy into `--work-dir`. Pass `--bin-dir` only to use a different copy.
 - `bash`, `bc`, `awk`, `sed`, `grep`, `coreutils`
 
 ## Usage
 
-Place `spacek40` next to `totalautomodelIC`, then:
+`spacek40` is already next to `totalautomodelIC`. From the repository root:
 
 ```bash
 scripts/02_motif/run_motif.sh \
@@ -106,5 +106,5 @@ Primary output: `{output_prefix}_logos.svg` in `--work-dir`, plus refined PFMs /
 | File | Role |
 |------|------|
 | `scripts/02_motif/totalautomodelIC` | Upstream motif automation script (unchanged) |
-| `scripts/02_motif/run_motif.sh` | Driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length` |
-| `spacek40` | Required external binary (not shipped; supply locally) |
+| `scripts/02_motif/run_motif.sh` | Driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length`. `--bin-dir` defaults to this directory |
+| `scripts/02_motif/spacek40` | Background binary used by `totalautomodelIC` |

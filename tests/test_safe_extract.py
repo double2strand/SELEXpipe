@@ -362,14 +362,32 @@ class TestMotifDriverWidthGuard(unittest.TestCase):
             tmp_path = Path(tmp)
             background = tmp_path / "bg.seq"
             signal = tmp_path / "sig.seq"
+            work = tmp_path / "work"
             background.write_text(LIG147_SEQ[:40] + "\n", encoding="utf-8")
             signal.write_text((LIG147_SEQ[10:50] + "\n") * 2, encoding="utf-8")
-            proc = self._run_motif(background, signal, seq_length=40)
-            # Width check passed; driver should then fail on missing spacek40,
-            # not on SEQ length.
+            proc = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "02_motif" / "run_motif.sh"),
+                    "--background",
+                    str(background),
+                    "--signal",
+                    str(signal),
+                    "--seq-length",
+                    "40",
+                    "--work-dir",
+                    str(work),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            # Width check passed and the shipped spacek40 was used.
             self.assertNotIn("!= expected", proc.stderr)
             self.assertNotIn("SEQ is empty", proc.stderr)
-            self.assertIn("spacek40", proc.stderr)
+            self.assertNotIn("spacek40 binary not found", proc.stderr)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("scripts/02_motif", proc.stdout)
 
 
 if __name__ == "__main__":

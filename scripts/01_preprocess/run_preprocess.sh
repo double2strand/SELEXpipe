@@ -39,6 +39,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+DEFAULT_ADAPTER_FASTA="${REPO_ROOT}/config/adapters.fa"
 
 SAMPLE=""
 INPUT_DIR="."
@@ -70,12 +72,11 @@ ligand_length() {
 
 usage() {
   cat <<'EOF'
-Usage: run_preprocess.sh --sample SAMPLE --adapter-fasta ADAPTERS.fa \
+Usage: run_preprocess.sh --sample SAMPLE \
                          (--target-length N | --ligand DESIGN) [options]
 
 Required:
   --sample NAME              Sample prefix (generic; replaces experiment-specific IDs)
-  --adapter-fasta PATH       Adapter FASTA for fastp (e.g. Adapters_TruSeq3PE.fa)
   --target-length N          Final read length passed to filter_by_length.py
   --ligand DESIGN            Ligand design key (sets --target_length; see table)
 
@@ -92,6 +93,9 @@ Ligand design expected merged lengths (do not "correct"):
   ligN40 vs ligN70 constant flanks differ; the 60 bp (not 30 bp) delta is expected.
 
 Optional:
+  --adapter-fasta PATH       Adapter FASTA for fastp (default: config/adapters.fa)
+                             These are example adapters. If you use custom
+                             adapters, edit config/adapters.fa or pass your own file.
   --input-dir DIR            Directory containing lane FASTQ.gz files (default: .)
   --output-dir DIR           Directory for outputs (default: .); writes into DIR/SAMPLE/
   --min-input-len N          Min input length to retain (default: target length - 9)
@@ -116,7 +120,6 @@ does not pad.
 Example:
   scripts/01_preprocess/run_preprocess.sh \
       --sample SAMPLE \
-      --adapter-fasta ./Adapters_TruSeq3PE.fa \
       --ligand lig200 \
       --input-dir ./raw \
       --output-dir ./processed
@@ -163,7 +166,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$SAMPLE" ]] || { usage; die "--sample is required"; }
-[[ -n "$ADAPTER_FASTA" ]] || { usage; die "--adapter-fasta is required"; }
+if [[ -z "$ADAPTER_FASTA" ]]; then
+  ADAPTER_FASTA="$DEFAULT_ADAPTER_FASTA"
+fi
 [[ -f "$ADAPTER_FASTA" ]] || die "adapter FASTA not found: $ADAPTER_FASTA"
 [[ -d "$INPUT_DIR" ]] || die "input directory not found: $INPUT_DIR"
 

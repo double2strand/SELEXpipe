@@ -20,10 +20,6 @@ build/
 *.swp
 *~
 
-# External motif binary. totalautomodelIC calls ./spacek40; supply it locally.
-spacek40
-**/spacek40
-
 # Sequencing inputs and pipeline output directories
 raw/
 processed/

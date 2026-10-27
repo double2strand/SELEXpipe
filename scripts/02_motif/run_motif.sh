@@ -17,9 +17,9 @@
 #   local_max_cutoff_count logo_number_cutoff logo_similarity_cutoff
 #   output_prefix
 #
-# Requires the spacek40 binary alongside totalautomodelIC (the script
-# invokes ./spacek40). Place spacek40 in --bin-dir
-# (default: the directory containing this script).
+# Requires spacek40 alongside totalautomodelIC (the script invokes
+# ./spacek40). The binary ships in this directory. --bin-dir defaults
+# to the directory containing this script.
 
 set -euo pipefail
 
@@ -52,7 +52,8 @@ Required:
 Optional:
   --output-prefix NAME       Output name prefix (default: <signal_basename>v1)
   --bin-dir DIR              Directory containing totalautomodelIC and spacek40
-                             (default: the directory containing this script)
+                             (default: this script's directory,
+                             scripts/02_motif/, where spacek40 is shipped)
   --work-dir DIR             Working directory for motif outputs (default: .)
   --seq-length N             Expected SEQ line width and -NN flag (default: 40).
                              Refuses to run if any line length differs.

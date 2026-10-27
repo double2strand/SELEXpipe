@@ -7,7 +7,7 @@ discovery on those libraries.
 Two stages are implemented:
 
 1. **Preprocessing** — adapter-aware paired-end merge with [fastp](https://github.com/opengene/fastp), a length-window filter that pads or trims reads to a target length, and one k-mer per molecule (default 40 bp). The k-mer step drops a short window unless you pass `--allow-pad` and `--seed`.
-2. **Motif discovery** — `totalautomodelIC` (v0.22) with the external `spacek40` binary. The driver refuses a SEQ file that is empty or whose lines are not all the expected width.
+2. **Motif discovery** — `totalautomodelIC` (v0.22) with `scripts/02_motif/spacek40`. The driver refuses a SEQ file that is empty or whose lines are not all the expected width.
 
 Enrichment filtering beyond length, library reformatting, motif-position matching, and mutual-information analysis are described as later stages. They have no scripts in this repository.
 
@@ -35,6 +35,7 @@ flowchart TD
 SELEXpipe/
 ├── README.md
 ├── config/
+│   ├── adapters.fa                 # example fastp adapters
 │   └── ligands.tsv                 # reference table; scripts do not load it
 ├── data/
 │   └── examples/
@@ -53,6 +54,7 @@ SELEXpipe/
 │   │   └── trim_to_kmer.py         # step inside the driver
 │   └── 02_motif/
 │       ├── run_motif.sh            # driver; checks SEQ line width
+│       ├── spacek40                 # binary used by totalautomodelIC
 │       └── totalautomodelIC        # upstream recipe, unmodified
 └── tests/
     └── test_safe_extract.py        # k-mer extract, length window, motif width guard
@@ -68,7 +70,7 @@ SELEXpipe/
 | seqtk | FASTQ → FASTA | bioconda |
 | bash, gzip, cat | preprocessing driver | system |
 | bc, awk, sed, grep | `totalautomodelIC` | system (`bc` is also in the conda env) |
-| spacek40 | motif discovery | not shipped; no download URL is recorded here |
+| spacek40 | motif discovery | shipped at `scripts/02_motif/spacek40` |
 
 [fastp](https://github.com/opengene/fastp) and `seqtk` versions were not pinned in the original scripts, so `environment.yml` does not pin them either.
 
@@ -76,7 +78,7 @@ SELEXpipe/
 
 [fastp](https://github.com/opengene/fastp) is the paired-end merge and adapter trimmer. Install it from that repository, or let conda install the bioconda package when you create the environment below.
 
-Conda (preprocessing and motif shell tools, except `spacek40`):
+Conda (preprocessing tools; `spacek40` is already in the repository):
 
 ```bash
 conda env create -f envs/environment.yml
@@ -89,7 +91,7 @@ Python only (enough for the length filter, the k-mer extract, and the tests):
 python3 -m pip install -r envs/requirements.txt
 ```
 
-Place the `spacek40` binary in `scripts/02_motif/` or pass `--bin-dir`. The motif driver symlinks it into the working directory because `totalautomodelIC` calls `./spacek40`.
+`scripts/02_motif/spacek40` is the binary `totalautomodelIC` calls. `run_motif.sh` defaults `--bin-dir` to that directory and symlinks `spacek40` into the working directory, because `totalautomodelIC` runs `./spacek40`.
 
 ## Ligand lengths
 
@@ -119,12 +121,11 @@ Inputs under `--input-dir` (four files per sample):
 | `{SAMPLE}_L2_R1.fastq.gz` | lane 2, read 1 |
 | `{SAMPLE}_L2_R2.fastq.gz` | lane 2, read 2 |
 
-The adapter FASTA is a separate argument (for example `Adapters_TruSeq3PE.fa`). This repository does not include one.
+`config/adapters.fa` is the default adapter file (`--adapter-fasta` overrides it). These are example adapters. If you use custom adapters, edit config/adapters.fa or pass your own file.
 
 ```bash
 scripts/01_preprocess/run_preprocess.sh \
   --sample SAMPLE \
-  --adapter-fasta ./Adapters_TruSeq3PE.fa \
   --ligand lig200 \
   --input-dir ./raw \
   --output-dir ./processed
@@ -223,7 +224,7 @@ scripts/02_motif/run_motif.sh \
 |-------|---------|
 | `--background` | SEQ from the naïve or input library |
 | `--signal` | SEQ from an enriched round |
-| `spacek40` in `--bin-dir` | external binary (default directory: `scripts/02_motif/`) |
+| `spacek40` | shipped at `scripts/02_motif/spacek40` (`--bin-dir` defaults there) |
 
 | Output (in `--work-dir`) | Meaning |
 |--------------------------|---------|
@@ -244,7 +245,7 @@ python3 -m pip install -r envs/requirements.txt
 python3 -m unittest discover -s tests -v
 ```
 
-The tests check that an exact-length read yields one k-mer of the requested width, that the k-mer step drops a short read and writes no random bases by default, that the length filter applies the window and the three trim modes, that `--seed` repeats padding, that a 154 bp filtered read still yields one 40-mer, and that the motif driver rejects a SEQ line of the wrong width before it looks for `spacek40`.
+The tests check that an exact-length read yields one k-mer of the requested width, that the k-mer step drops a short read and writes no random bases by default, that the length filter applies the window and the three trim modes, that `--seed` repeats padding, that a 154 bp filtered read still yields one 40-mer, and that the motif driver rejects a SEQ line of the wrong width before it runs the shipped `spacek40`.
 
 ## License
 

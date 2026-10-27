@@ -13,5 +13,5 @@ The filter script's own defaults (target 154, window 145–163) drop all three
 records. Those lengths are outside that window.
 
 The 101 bp record is `A`×40 + `C`×40 + `G`×21, so a default 40-mer extract is
-forty `A`s. No adapter FASTA and no lane FASTQs are included; those stay with
-the experiment. `spacek40` is not included either.
+forty `A`s. Lane FASTQs stay with the experiment. Example adapters are
+`config/adapters.fa`. The motif binary is `scripts/02_motif/spacek40`.
