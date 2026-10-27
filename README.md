@@ -269,6 +269,111 @@ python3 "${SCRIPT_DIR}/trim_to_kmer.py" \
   --start "$KMER_START"
 ```
 
+Motif discovery is the next stage. `run_motif.sh` checks both SEQ files, then runs `totalautomodelIC` with `spacek40` from `scripts/02_motif/`. Defaults below are the ones in that script.
+
+```bash
+BACKGROUND=processed/BACKGROUND/BACKGROUND_101.seq
+SIGNAL=processed/SIGNAL_r4/SIGNAL_r4_101.seq
+SEQ_LENGTH=40
+
+validate_seq_width() {
+  local file="$1"
+  local expected="$2"
+  local label="$3"
+  python3 - "$file" "$expected" "$label" <<'PY'
+import sys
+
+path, expected_s, label = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    expected = int(expected_s)
+except ValueError:
+    sys.exit(f"[motif] error: --seq-length must be an integer, got {expected_s!r}")
+if expected <= 0:
+    sys.exit(f"[motif] error: --seq-length must be positive, got {expected}")
+
+n = 0
+with open(path, encoding="utf-8") as handle:
+    for lineno, raw in enumerate(handle, 1):
+        seq = raw.rstrip("\n\r")
+        if not seq:
+            sys.exit(f"[motif] error: {label} SEQ line {lineno} is empty ({path})")
+        if len(seq) != expected:
+            sys.exit(
+                f"[motif] error: {label} SEQ line {lineno} length {len(seq)} "
+                f"!= expected {expected} ({path})"
+            )
+        n += 1
+if n == 0:
+    sys.exit(f"[motif] error: {label} SEQ is empty ({path})")
+PY
+}
+
+validate_seq_width "$BACKGROUND" "$SEQ_LENGTH" "background"
+validate_seq_width "$SIGNAL" "$SEQ_LENGTH" "signal"
+```
+
+The check runs on the background file, then the signal file. It exits if `--seq-length` is not a positive integer, if the file has no sequence lines, or if any line (after stripping the newline) is empty or a different length. The driver does this before it looks for the motif binaries.
+
+`totalautomodelIC` calls `./spacek40` and writes into the current directory, so the driver resolves paths, links both binaries into the work directory, and only then runs this command. `BIN_DIR` defaults to `scripts/02_motif/`, where `spacek40` is shipped. `LENGTH_FLAG` is one argument. With `--all-gaps` that argument is the single string `-${SEQ_LENGTH}N -allgaps` instead of `-${SEQ_LENGTH}N`. If `OUTPUT_PREFIX` is empty, the script uses the signal filename without `.seq`, plus `v1`.
+
+```bash
+BIN_DIR=scripts/02_motif
+WORK_DIR=motif_out/SIGNAL_r4
+OUTPUT_PREFIX=SIGNAL_r4v1
+MULTINOMIAL=1
+MIN_SEED=6
+MAX_SEED=6
+LENGTH_CUTOFF=0.25
+IUPAC_CUTOFF="-"
+LOCAL_MAX_CUTOFF=20
+LOGO_NUMBER=50
+LOGO_SIMILARITY=0.1
+
+BACKGROUND="$(cd "$(dirname "$BACKGROUND")" && pwd)/$(basename "$BACKGROUND")"
+SIGNAL="$(cd "$(dirname "$SIGNAL")" && pwd)/$(basename "$SIGNAL")"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
+mkdir -p "$WORK_DIR"
+WORK_DIR="$(cd "$WORK_DIR" && pwd)"
+
+TOTALAUTOMODELIC="${BIN_DIR}/totalautomodelIC"
+SPACEK40="${BIN_DIR}/spacek40"
+chmod +x "$TOTALAUTOMODELIC" "$SPACEK40" 2>/dev/null || true
+LENGTH_FLAG="-${SEQ_LENGTH}N"
+
+cd "$WORK_DIR"
+ln -sfn "$TOTALAUTOMODELIC" ./totalautomodelIC
+ln -sfn "$SPACEK40" ./spacek40
+
+./totalautomodelIC \
+  "$LENGTH_FLAG" \
+  "$BACKGROUND" \
+  "$SIGNAL" \
+  "$MULTINOMIAL" \
+  "$MIN_SEED" \
+  "$MAX_SEED" \
+  "$LENGTH_CUTOFF" \
+  "$IUPAC_CUTOFF" \
+  "$LOCAL_MAX_CUTOFF" \
+  "$LOGO_NUMBER" \
+  "$LOGO_SIMILARITY" \
+  "$OUTPUT_PREFIX"
+```
+
+| Argument | Default | Role |
+|----------|---------|------|
+| `$LENGTH_FLAG` | `-40N` | Sequence length passed as one argument (`-${SEQ_LENGTH}N`). `--all-gaps` makes it `-${SEQ_LENGTH}N -allgaps`, still one argument |
+| `$BACKGROUND` | — | Background SEQ path |
+| `$SIGNAL` | — | Enriched SEQ path |
+| `$MULTINOMIAL` | `1` | Multinomial setting |
+| `$MIN_SEED` | `6` | Minimum seed length |
+| `$MAX_SEED` | `6` | Maximum seed length |
+| `$LENGTH_CUTOFF` | `0.25` | Length cutoff |
+| `$IUPAC_CUTOFF` | `-` | IUPAC cutoff; `-` disables it |
+| `$LOCAL_MAX_CUTOFF` | `20` | Minimum count for a local-maximum k-mer |
+| `$LOGO_NUMBER` | `50` | Maximum number of logos |
+| `$LOGO_SIMILARITY` | `0.1` | Logo similarity cutoff |
+| `$OUTPUT_PREFIX` | `<signal_basename>v1` | Prefix for `${OUTPUT_PREFIX}_logos.svg` and the other motif files |
+
 ### 1b. Length filter and k-mer extract on the synthetic example
 
 These two commands do not need [fastp](https://github.com/opengene/fastp), `seqtk`, or real FASTQs. From the repository root:
@@ -329,7 +434,7 @@ A kept read is exactly the target length. lig200 output is 154 bp, which is long
 
 ### 2. Motif discovery
 
-Run preprocessing separately on a background library and on an enriched (signal) library. SEQ lines must all have length `--seq-length` (default 40).
+Run preprocessing separately on a background library and on an enriched (signal) library. SEQ lines must all have length `--seq-length` (default 40). The width check and the `totalautomodelIC` command are written out under [Running steps standalone](#running-steps-standalone).
 
 ```bash
 scripts/02_motif/run_motif.sh \

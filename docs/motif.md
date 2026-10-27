@@ -101,6 +101,115 @@ scripts/02_motif/run_motif.sh \
 
 Primary output: `{output_prefix}_logos.svg` in `--work-dir`, plus refined PFMs / seed lists written by `totalautomodelIC`.
 
+## Running steps standalone
+
+These are the two steps inside `run_motif.sh`, in order. `spacek40` is `scripts/02_motif/spacek40`. The values below are that script's defaults.
+
+The driver refuses a SEQ file before it looks for the motif binaries. This is `validate_seq_width`, called first on the background file and then on the signal file:
+
+```bash
+BACKGROUND=processed/BACKGROUND/BACKGROUND_101.seq
+SIGNAL=processed/SIGNAL_r4/SIGNAL_r4_101.seq
+SEQ_LENGTH=40
+
+validate_seq_width() {
+  local file="$1"
+  local expected="$2"
+  local label="$3"
+  python3 - "$file" "$expected" "$label" <<'PY'
+import sys
+
+path, expected_s, label = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    expected = int(expected_s)
+except ValueError:
+    sys.exit(f"[motif] error: --seq-length must be an integer, got {expected_s!r}")
+if expected <= 0:
+    sys.exit(f"[motif] error: --seq-length must be positive, got {expected}")
+
+n = 0
+with open(path, encoding="utf-8") as handle:
+    for lineno, raw in enumerate(handle, 1):
+        seq = raw.rstrip("\n\r")
+        if not seq:
+            sys.exit(f"[motif] error: {label} SEQ line {lineno} is empty ({path})")
+        if len(seq) != expected:
+            sys.exit(
+                f"[motif] error: {label} SEQ line {lineno} length {len(seq)} "
+                f"!= expected {expected} ({path})"
+            )
+        n += 1
+if n == 0:
+    sys.exit(f"[motif] error: {label} SEQ is empty ({path})")
+PY
+}
+
+validate_seq_width "$BACKGROUND" "$SEQ_LENGTH" "background"
+validate_seq_width "$SIGNAL" "$SEQ_LENGTH" "signal"
+```
+
+A line counts after the newline is stripped. The check exits if `--seq-length` is not a positive integer, if the file has no sequence lines, or if any line is empty or the wrong length.
+
+`totalautomodelIC` calls `./spacek40` and writes relative to the current directory. The driver turns the SEQ paths and `BIN_DIR` into absolute paths, links `totalautomodelIC` and `spacek40` into the work directory, then runs this command. `LENGTH_FLAG` is one shell argument. `--all-gaps` changes that argument from `-${SEQ_LENGTH}N` to the single string `-${SEQ_LENGTH}N -allgaps`. If `OUTPUT_PREFIX` is empty, the script uses the signal filename without `.seq`, plus `v1`.
+
+```bash
+BIN_DIR=scripts/02_motif
+WORK_DIR=motif_out/SIGNAL_r4
+OUTPUT_PREFIX=SIGNAL_r4v1
+MULTINOMIAL=1
+MIN_SEED=6
+MAX_SEED=6
+LENGTH_CUTOFF=0.25
+IUPAC_CUTOFF="-"
+LOCAL_MAX_CUTOFF=20
+LOGO_NUMBER=50
+LOGO_SIMILARITY=0.1
+
+BACKGROUND="$(cd "$(dirname "$BACKGROUND")" && pwd)/$(basename "$BACKGROUND")"
+SIGNAL="$(cd "$(dirname "$SIGNAL")" && pwd)/$(basename "$SIGNAL")"
+BIN_DIR="$(cd "$BIN_DIR" && pwd)"
+mkdir -p "$WORK_DIR"
+WORK_DIR="$(cd "$WORK_DIR" && pwd)"
+
+TOTALAUTOMODELIC="${BIN_DIR}/totalautomodelIC"
+SPACEK40="${BIN_DIR}/spacek40"
+chmod +x "$TOTALAUTOMODELIC" "$SPACEK40" 2>/dev/null || true
+LENGTH_FLAG="-${SEQ_LENGTH}N"
+
+cd "$WORK_DIR"
+ln -sfn "$TOTALAUTOMODELIC" ./totalautomodelIC
+ln -sfn "$SPACEK40" ./spacek40
+
+./totalautomodelIC \
+  "$LENGTH_FLAG" \
+  "$BACKGROUND" \
+  "$SIGNAL" \
+  "$MULTINOMIAL" \
+  "$MIN_SEED" \
+  "$MAX_SEED" \
+  "$LENGTH_CUTOFF" \
+  "$IUPAC_CUTOFF" \
+  "$LOCAL_MAX_CUTOFF" \
+  "$LOGO_NUMBER" \
+  "$LOGO_SIMILARITY" \
+  "$OUTPUT_PREFIX"
+```
+
+| Argument | Default | Role |
+|----------|---------|------|
+| `$LENGTH_FLAG` | `-40N` | Sequence length passed as one argument (`-${SEQ_LENGTH}N`). `--all-gaps` makes it `-${SEQ_LENGTH}N -allgaps`, still one argument |
+| `$BACKGROUND` | — | Background SEQ path |
+| `$SIGNAL` | — | Enriched SEQ path |
+| `$MULTINOMIAL` | `1` | Multinomial setting |
+| `$MIN_SEED` | `6` | Minimum seed length |
+| `$MAX_SEED` | `6` | Maximum seed length |
+| `$LENGTH_CUTOFF` | `0.25` | Length cutoff |
+| `$IUPAC_CUTOFF` | `-` | IUPAC cutoff; `-` disables it |
+| `$LOCAL_MAX_CUTOFF` | `20` | Minimum count for a local-maximum k-mer |
+| `$LOGO_NUMBER` | `50` | Maximum number of logos |
+| `$LOGO_SIMILARITY` | `0.1` | Logo similarity cutoff |
+| `$OUTPUT_PREFIX` | `<signal_basename>v1` | Prefix for `${OUTPUT_PREFIX}_logos.svg` and the other motif files |
+
 ## Files
 
 | File | Role |
