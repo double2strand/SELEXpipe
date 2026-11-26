@@ -14,4 +14,4 @@ records. Those lengths are outside that window.
 
 The 101 bp record is `A`×40 + `C`×40 + `G`×21, so a default 40-mer extract is
 forty `A`s. Lane FASTQs stay with the experiment. Example adapters are
-`config/adapters.fa`. The motif binary is `scripts/02_motif/spacek40`.
+`config/adapters.fa`. The motif binary is `workflow/02_motif_discovery/spacek40`.

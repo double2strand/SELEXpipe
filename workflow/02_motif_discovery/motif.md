@@ -1,9 +1,11 @@
 # Motif processing
 
-Paths below are relative to the repository root. Scripts live in
-`scripts/02_motif/`.
+Stage overview, process order, inputs, and outputs: [README.md](README.md).
 
-This module runs motif discovery on SEQ files produced by [`scripts/01_preprocess/trim_to_kmer.py`](../scripts/01_preprocess/trim_to_kmer.py) (one fixed-width line per molecule), using **`totalautomodelIC`** (v0.22) with **`spacek40`**.
+Paths below are relative to the repository root. Scripts live in
+`workflow/02_motif_discovery/`.
+
+This module runs motif discovery on SEQ files produced by [`workflow/01_preprocessing/trim_to_kmer.py`](../01_preprocessing/trim_to_kmer.py) (one fixed-width line per molecule), using **`totalautomodelIC`** (v0.22) with **`spacek40`**.
 
 `run_motif.sh` **refuses to run** if the background or signal SEQ is empty, or if any line length ≠ `--seq-length` (default **40**). That guard exists so tiled/padded/variable-width libraries cannot silently feed `totalautomodelIC`.
 
@@ -17,7 +19,7 @@ Given a background SEQ library and a signal (enriched) SEQ library:
 4. Refine accepted seeds (information content between 10 and 20 bits).
 5. Write accepted / unrefined / rejected models into an SVG logo file.
 
-The shipped `totalautomodelIC` script (`scripts/02_motif/totalautomodelIC`) is the established analysis recipe and is **not modified** in this repository. It calls `./spacek40` in the working directory. `run_motif.sh` symlinks the shipped binary `scripts/02_motif/spacek40` there. `--bin-dir` defaults to that directory.
+The shipped `totalautomodelIC` script (`workflow/02_motif_discovery/totalautomodelIC`) is the established analysis recipe and is **not modified** in this repository. It calls `./spacek40` in the working directory. `run_motif.sh` symlinks the shipped binary `workflow/02_motif_discovery/spacek40` there. `--bin-dir` defaults to that directory.
 
 ## Generic naming
 
@@ -87,8 +89,8 @@ Maximum seed length `12` and logo number `100` differ from the `run_motif.sh` de
 
 ## Dependencies
 
-- `totalautomodelIC` — included at `scripts/02_motif/totalautomodelIC` (bash; do not edit)
-- `spacek40` — included at `scripts/02_motif/spacek40`. `totalautomodelIC` invokes it as `./spacek40`. The driver symlinks this copy into `--work-dir`. Pass `--bin-dir` only to use a different copy.
+- `totalautomodelIC` — included at `workflow/02_motif_discovery/totalautomodelIC` (bash; do not edit)
+- `spacek40` — included at `workflow/02_motif_discovery/spacek40`. `totalautomodelIC` invokes it as `./spacek40`. The driver symlinks this copy into `--work-dir`. Pass `--bin-dir` only to use a different copy.
 - `bash`, `bc`, `awk`, `sed`, `grep`, `coreutils`
 
 ## Usage
@@ -96,7 +98,7 @@ Maximum seed length `12` and logo number `100` differ from the `run_motif.sh` de
 `spacek40` is already next to `totalautomodelIC`. From the repository root:
 
 ```bash
-scripts/02_motif/run_motif.sh \
+workflow/02_motif_discovery/run_motif.sh \
   --background ./processed/BACKGROUND/BACKGROUND_101.seq \
   --signal ./processed/SIGNAL_r4/SIGNAL_r4_101.seq \
   --output-prefix SIGNAL_r4v1 \
@@ -104,7 +106,7 @@ scripts/02_motif/run_motif.sh \
 ```
 
 ```bash
-scripts/02_motif/run_motif.sh \
+workflow/02_motif_discovery/run_motif.sh \
   --background ./processed/BACKGROUND/BACKGROUND_101.seq \
   --signal ./processed/SIGNAL_r3/SIGNAL_r3_101.seq \
   --output-prefix SIGNAL_r3v1 \
@@ -115,7 +117,7 @@ Primary output: `{output_prefix}_logos.svg` in `--work-dir`, plus refined PFMs /
 
 ## Running steps standalone
 
-These are the two steps inside `run_motif.sh`, in order. `spacek40` is `scripts/02_motif/spacek40`. The values below are that script's defaults.
+These are the two steps inside `run_motif.sh`, in order. `spacek40` is `workflow/02_motif_discovery/spacek40`. The values below are that script's defaults.
 
 The driver refuses a SEQ file before it looks for the motif binaries. This is `validate_seq_width`, called first on the background file and then on the signal file:
 
@@ -165,7 +167,7 @@ A line counts after the newline is stripped. The check exits if `--seq-length` i
 `totalautomodelIC` calls `./spacek40` and writes relative to the current directory. The driver turns the SEQ paths and `BIN_DIR` into absolute paths, links `totalautomodelIC` and `spacek40` into the work directory, then runs this command. `LENGTH_FLAG` is one shell argument. `--all-gaps` changes that argument from `-${SEQ_LENGTH}N` to the single string `-${SEQ_LENGTH}N -allgaps`. If `OUTPUT_PREFIX` is empty, the script uses the signal filename without `.seq`, plus `v1`.
 
 ```bash
-BIN_DIR=scripts/02_motif
+BIN_DIR=workflow/02_motif_discovery
 WORK_DIR=motif_out/SIGNAL_r4
 OUTPUT_PREFIX=SIGNAL_r4v1
 MULTINOMIAL=1
@@ -226,6 +228,6 @@ ln -sfn "$SPACEK40" ./spacek40
 
 | File | Role |
 |------|------|
-| `scripts/02_motif/totalautomodelIC` | Upstream motif automation script (unchanged) |
-| `scripts/02_motif/run_motif.sh` | Driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length`. `--bin-dir` defaults to this directory |
-| `scripts/02_motif/spacek40` | Background binary used by `totalautomodelIC` |
+| `workflow/02_motif_discovery/totalautomodelIC` | Upstream motif automation script (unchanged) |
+| `workflow/02_motif_discovery/run_motif.sh` | Driver around `totalautomodelIC`; refuses SEQ lines whose length ≠ `--seq-length`. `--bin-dir` defaults to this directory |
+| `workflow/02_motif_discovery/spacek40` | Background binary used by `totalautomodelIC` |
