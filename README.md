@@ -4,10 +4,13 @@ SELEXpipe is a SELEX sequencing analysis pipeline. It turns
 paired-end HT-SELEX & NCAP-SELEX reads into fixed-width sequence libraries and runs motif
 discovery on those libraries.
 
-Two stages are implemented:
+Three stages are implemented, under [`workflow/`](workflow/README.md):
 
+0. **Sample renaming** — build a two-column map from the sequencing manifest and rename Sanger run IDs (for example `8030STDY17011914`) to sample and assay names (`HTS/SOX2R1/SOX2R1c1/...`). This runs before any read processing.
 1. **Preprocessing** — adapter-aware paired-end merge with [fastp](https://github.com/opengene/fastp), a length-window filter that pads or trims reads to a target length, and one k-mer per molecule (default 40 bp). The k-mer step drops a short window unless you pass `--allow-pad` and `--seed`.
-2. **Motif discovery** — `totalautomodelIC` (v0.22) with `scripts/02_motif/spacek40`. The driver refuses a SEQ file that is empty or whose lines are not all the expected width.
+2. **Motif discovery** — `totalautomodelIC` (v0.22) with `workflow/02_motif_discovery/spacek40`. The driver refuses a SEQ file that is empty or whose lines are not all the expected width.
+
+Each stage directory has a README for the stage and a numbered folder for each process (what that step does, its inputs, its outputs, and which command runs). The scripts stay in the stage directory: the drivers call the other files next to themselves, and the preprocessing scripts open `config/adapters.fa` from two levels above the script.
 
 Enrichment filtering beyond length, library reformatting, motif-position matching, and mutual-information analysis are described as later stages. They have no scripts in this repository.
 
@@ -15,63 +18,88 @@ Enrichment filtering beyond length, library reformatting, motif-position matchin
 
 ```mermaid
 flowchart TD
-  raw["Lane FASTQs<br/>SAMPLE_L1/L2 _R1/R2 .fastq.gz"]
-  fastp["fastp per lane<br/>https://github.com/opengene/fastp"]
-  cat["Concatenate lanes<br/>and decompress a copy"]
-  fasta["seqtk seq -a<br/>FASTQ to FASTA"]
-  filt["filter_by_length.py<br/>window, then pad or trim"]
-  kmer["trim_to_kmer.py<br/>one window per read, default 40 bp"]
-  motif["run_motif.sh<br/>totalautomodelIC + spacek40"]
-  logos["PREFIX_logos.svg<br/>PFMs and seed lists"]
-
-  raw --> fastp --> cat --> fasta --> filt --> kmer --> motif --> logos
+  manifest["Sequencing manifest"]
+  rename["00 Sample renaming<br/>selex_rename.py"]
+  subgraph pre ["01 Preprocessing"]
+    raw["Renamed lane FASTQs<br/>SAMPLE_L1/L2 _R1/R2 .fastq.gz"]
+    merge["Merge lanes<br/>fastp per lane, then cat"]
+    fasta["FASTQ to FASTA<br/>gzip -d -c, seqtk seq -a"]
+    filt["Length filter<br/>filter_by_length.py"]
+    kmer["SEQ extract<br/>trim_to_kmer.py, default 40 bp"]
+    raw --> merge --> fasta --> filt --> kmer
+  end
+  subgraph mot ["02 Motif discovery"]
+    check["SEQ width check<br/>run_motif.sh"]
+    model["Model building<br/>totalautomodelIC + spacek40"]
+    logos["PREFIX_logos.svg<br/>PFMs and seed lists"]
+    check --> model --> logos
+  end
+  manifest --> rename --> raw
+  kmer --> check
 ```
 
-`scripts/01_preprocess/run_preprocess.sh` runs everything from [fastp](https://github.com/opengene/fastp) through the k-mer extract. `scripts/02_motif/run_motif.sh` runs motif discovery. Background and signal SEQ files are produced by running preprocessing on each library, then passed in as `--background` and `--signal`.
+`workflow/00_sample_renaming/selex_rename.py` renames Sanger IDs to sample and assay folders before anything else. `workflow/01_preprocessing/run_preprocess.sh` then runs everything from [fastp](https://github.com/opengene/fastp) through the k-mer extract on those renamed FASTQs. `workflow/02_motif_discovery/run_motif.sh` runs motif discovery. Background and signal SEQ files are produced by running preprocessing on each library, then passed in as `--background` and `--signal`.
 
 ## Directory layout
 
 ```text
 SELEXpipe/
 ├── README.md
-├── config/
-│   ├── adapters.fa                 # example fastp adapters
-│   └── ligands.tsv                 # reference table; scripts do not load it
+├── config/                                  # adapters.fa is loaded from here
+│   ├── README.md
+│   ├── adapters.fa                          # example fastp adapters
+│   └── ligands.tsv                          # reference table; scripts do not load it
 ├── data/
+│   ├── README.md
 │   └── examples/
 │       ├── README.md
-│       └── lig147_synthetic.fa     # synthetic 3-read FASTA, not a real run
-├── docs/
-│   ├── preprocessing.md            # flags, fastp defaults, file names
-│   └── motif.md                    # totalautomodelIC arguments
+│       └── lig147_synthetic.fa              # synthetic 3-read FASTA, not a real run
 ├── envs/
-│   ├── environment.yml             # conda: python, biopython, fastp, seqtk, bc
-│   └── requirements.txt            # pip: biopython
-├── scripts/
-│   ├── 01_preprocess/
-│   │   ├── run_preprocess.sh       # driver
-│   │   ├── run_fastp.sh            # one lane of the driver's fastp call
-│   │   ├── filter_by_length.py     # step inside the driver
-│   │   └── trim_to_kmer.py         # step inside the driver
-│   └── 02_motif/
-│       ├── run_motif.sh            # driver; checks SEQ line width
-│       ├── spacek40                 # binary used by totalautomodelIC
-│       └── totalautomodelIC        # upstream recipe, unmodified
-└── tests/
-    └── test_safe_extract.py        # k-mer extract, length window, motif width guard
+│   ├── README.md
+│   ├── environment.yml                      # conda: python, biopython, fastp, seqtk, bc
+│   └── requirements.txt                     # pip: biopython
+├── tests/
+│   ├── README.md
+│   └── test_safe_extract.py                 # k-mer extract, length window, motif width guard
+└── workflow/
+    ├── README.md
+    ├── 00_sample_renaming/
+    │   ├── README.md                        # manifest map, then selex_rename.py
+    │   ├── selex_rename.py
+    │   └── examples/
+    │       └── example_map.tsv              # Sanger ID and sample name
+    ├── 01_preprocessing/
+    │   ├── README.md                        # stage: order, inputs, outputs
+    │   ├── preprocessing.md                 # flags, fastp defaults, file names
+    │   ├── 01_merge_lanes/README.md         # fastp per lane, then cat
+    │   ├── 02_fastq_to_fasta/README.md      # gzip -d -c, seqtk seq -a
+    │   ├── 03_length_filter/README.md       # filter_by_length.py
+    │   ├── 04_seq_extract/README.md         # trim_to_kmer.py
+    │   ├── run_preprocess.sh                # driver
+    │   ├── run_fastp.sh                     # one lane of the driver's fastp call
+    │   ├── filter_by_length.py
+    │   └── trim_to_kmer.py
+    └── 02_motif_discovery/
+        ├── README.md
+        ├── motif.md                         # totalautomodelIC arguments
+        ├── 01_seq_width_check/README.md
+        ├── 02_model_building/README.md      # totalautomodelIC + spacek40
+        ├── run_motif.sh                     # driver; checks SEQ line width
+        ├── spacek40                        # binary used by totalautomodelIC
+        └── totalautomodelIC                # upstream recipe, unmodified
 ```
 
 ## Requirements
 
 | Tool | Used by | How to install |
 |------|---------|----------------|
-| Python ≥ 3.9 | length filter, k-mer extract, SEQ width check | conda or system |
+| Python ≥ 3.9 | sample renaming, length filter, k-mer extract, SEQ width check | conda or system |
 | Biopython ≥ 1.81 | `filter_by_length.py` | `envs/requirements.txt` or conda |
 | [fastp](https://github.com/opengene/fastp) | lane merge | [install from the fastp repo](https://github.com/opengene/fastp), or bioconda (`envs/environment.yml`) |
 | seqtk | FASTQ → FASTA | bioconda |
 | bash, gzip, cat | preprocessing driver | system |
 | bc, awk, sed, grep | `totalautomodelIC` | system (`bc` is also in the conda env) |
-| spacek40 | motif discovery | shipped at `scripts/02_motif/spacek40` |
+| spacek40 | motif discovery | shipped at `workflow/02_motif_discovery/spacek40` |
 
 [fastp](https://github.com/opengene/fastp) and `seqtk` versions were not pinned in the original scripts, so `environment.yml` does not pin them either.
 
@@ -92,7 +120,7 @@ Python only (enough for the length filter, the k-mer extract, and the tests):
 python3 -m pip install -r envs/requirements.txt
 ```
 
-`scripts/02_motif/spacek40` is the binary `totalautomodelIC` calls. `run_motif.sh` defaults `--bin-dir` to that directory and symlinks `spacek40` into the working directory, because `totalautomodelIC` runs `./spacek40`.
+`workflow/02_motif_discovery/spacek40` is the binary `totalautomodelIC` calls. `run_motif.sh` defaults `--bin-dir` to that directory and symlinks `spacek40` into the working directory, because `totalautomodelIC` runs `./spacek40`.
 
 ## Ligand lengths
 
@@ -111,9 +139,22 @@ Pass exactly one of `--ligand` or `--target-length`. There is no numeric default
 
 ## Usage
 
+### Sample renaming
+
+Build a map from the sequencing manifest (`<SangerSampleID>` and `<SampleName>`), then rename the run. Preview with `--dry-run`, then run it again without that flag. Details, the name pattern `C<cycle><ASSAY><ligand length><TF>R<replicate>`, and the exit codes are in [`workflow/00_sample_renaming/README.md`](workflow/00_sample_renaming/README.md).
+
+```bash
+python3 workflow/00_sample_renaming/selex_rename.py \
+  --base-dir ./run \
+  --map workflow/00_sample_renaming/examples/example_map.tsv \
+  --dry-run
+```
+
+`8030STDY17011914_L1_R1.fastq.gz` for `C1HTS200SOX2R1` lands at `HTS/SOX2R1/SOX2R1c1/SOX2R1c1_L1_R1.fastq.gz`. The replicate in `SOX2R1` and the read in `_R1` / `_R2` are different fields. Preprocessing takes its input from that renamed tree.
+
 ### 1. Preprocessing
 
-Inputs under `--input-dir` (four files per sample):
+Inputs are the renamed FASTQs from sample renaming. For `C1HTS200SOX2R1` that directory is `HTS/SOX2R1/SOX2R1c1/` and `--sample` is `SOX2R1c1`. Four files per sample, under `--input-dir`:
 
 | File | Role |
 |------|------|
@@ -125,7 +166,7 @@ Inputs under `--input-dir` (four files per sample):
 `config/adapters.fa` is the default adapter file (`--adapter-fasta` overrides it). These are example adapters. If you use custom adapters, edit config/adapters.fa or pass your own file.
 
 ```bash
-scripts/01_preprocess/run_preprocess.sh \
+workflow/01_preprocessing/run_preprocess.sh \
   --sample SAMPLE \
   --ligand lig200 \
   --input-dir ./raw \
@@ -145,15 +186,15 @@ Outputs under `processed/SAMPLE/` for lig200:
 | `SAMPLE_154.fa` | reads inside the window, padded or trimmed to 154 bp |
 | `SAMPLE_154.seq` | one 40 bp line per kept read |
 
-`--skip-fastp` resumes from the lane-merged gzip files. `--kmer-start` or `--center-kmer` moves the extracted window. `--allow-pad --seed N` pads only a short k-mer window. The length filter pads on its own. [fastp](https://github.com/opengene/fastp) flag defaults are in [`docs/preprocessing.md`](docs/preprocessing.md).
+`--skip-fastp` resumes from the lane-merged gzip files. `--kmer-start` or `--center-kmer` moves the extracted window. `--allow-pad --seed N` pads only a short k-mer window. The length filter pads on its own. [fastp](https://github.com/opengene/fastp) flag defaults are in [`workflow/01_preprocessing/preprocessing.md`](workflow/01_preprocessing/preprocessing.md).
 
 ```bash
-scripts/01_preprocess/run_preprocess.sh --help
+workflow/01_preprocessing/run_preprocess.sh --help
 ```
 
 #### Running steps standalone
 
-The blocks below are the commands inside `run_preprocess.sh`, in the order it runs them. The [fastp](https://github.com/opengene/fastp) invocation matches that script. `scripts/01_preprocess/run_fastp.sh` runs the same fastp block for one lane: `in1 in2 out_prefix [adapters] [threads]`.
+The blocks below are the commands inside `run_preprocess.sh`, in the order it runs them. The [fastp](https://github.com/opengene/fastp) invocation matches that script. `workflow/01_preprocessing/run_fastp.sh` runs the same fastp block for one lane: `in1 in2 out_prefix [adapters] [threads]`.
 
 Define the fastp variables, then run the block once per lane. `ADAPTER_FASTA` defaults to `config/adapters.fa`. `THREADS` is `nproc`, or 4 when `nproc` is missing. For lane 1 the driver sets `merged`, `json`, and `html` from `processed/SAMPLE/SAMPLE_L1` (lane 2 uses `SAMPLE_L2`).
 
@@ -204,12 +245,12 @@ fastp \
 Same block for lane 2, or:
 
 ```bash
-scripts/01_preprocess/run_fastp.sh \
+workflow/01_preprocessing/run_fastp.sh \
   raw/SAMPLE_L1_R1.fastq.gz \
   raw/SAMPLE_L1_R2.fastq.gz \
   processed/SAMPLE/SAMPLE_L1
 
-scripts/01_preprocess/run_fastp.sh \
+workflow/01_preprocessing/run_fastp.sh \
   raw/SAMPLE_L2_R1.fastq.gz \
   raw/SAMPLE_L2_R2.fastq.gz \
   processed/SAMPLE/SAMPLE_L2
@@ -238,7 +279,7 @@ seqtk seq -a "$COMBINED_FQ" > "$FASTA"
 Length filter. For `--ligand lig200` the driver sets the variables below (other ligands use that design's length and a ±9 bp window). `--seed "$SEED"` is added only when `SEED` is set.
 
 ```bash
-SCRIPT_DIR=scripts/01_preprocess
+SCRIPT_DIR=workflow/01_preprocessing
 FASTA=processed/SAMPLE/SAMPLE.fa
 FASTA_FILTERED=processed/SAMPLE/SAMPLE_154.fa
 TARGET_LEN=154
@@ -269,7 +310,7 @@ python3 "${SCRIPT_DIR}/trim_to_kmer.py" \
   --start "$KMER_START"
 ```
 
-Motif discovery is the next stage. `run_motif.sh` checks both SEQ files, then runs `totalautomodelIC` with `spacek40` from `scripts/02_motif/`. Defaults below are the ones in that script.
+Motif discovery is the next stage. `run_motif.sh` checks both SEQ files, then runs `totalautomodelIC` with `spacek40` from `workflow/02_motif_discovery/`. Defaults below are the ones in that script.
 
 ```bash
 BACKGROUND=processed/BACKGROUND/BACKGROUND_101.seq
@@ -314,10 +355,10 @@ validate_seq_width "$SIGNAL" "$SEQ_LENGTH" "signal"
 
 The check runs on the background file, then the signal file. It exits if `--seq-length` is not a positive integer, if the file has no sequence lines, or if any line (after stripping the newline) is empty or a different length. The driver does this before it looks for the motif binaries.
 
-`totalautomodelIC` calls `./spacek40` and writes into the current directory, so the driver resolves paths, links both binaries into the work directory, and only then runs this command. `BIN_DIR` defaults to `scripts/02_motif/`, where `spacek40` is shipped. `LENGTH_FLAG` is one argument. With `--all-gaps` that argument is the single string `-${SEQ_LENGTH}N -allgaps` instead of `-${SEQ_LENGTH}N`. If `OUTPUT_PREFIX` is empty, the script uses the signal filename without `.seq`, plus `v1`.
+`totalautomodelIC` calls `./spacek40` and writes into the current directory, so the driver resolves paths, links both binaries into the work directory, and only then runs this command. `BIN_DIR` defaults to `workflow/02_motif_discovery/`, where `spacek40` is shipped. `LENGTH_FLAG` is one argument. With `--all-gaps` that argument is the single string `-${SEQ_LENGTH}N -allgaps` instead of `-${SEQ_LENGTH}N`. If `OUTPUT_PREFIX` is empty, the script uses the signal filename without `.seq`, plus `v1`.
 
 ```bash
-BIN_DIR=scripts/02_motif
+BIN_DIR=workflow/02_motif_discovery
 WORK_DIR=motif_out/SIGNAL_r4
 OUTPUT_PREFIX=SIGNAL_r4v1
 MULTINOMIAL=1
@@ -381,14 +422,14 @@ These two commands do not need [fastp](https://github.com/opengene/fastp), `seqt
 The synthetic file is 8 bp, 101 bp, and 105 bp. The filter's default window (145–163) drops all three records. Pin the window to the lig147 length to keep the 101 bp read:
 
 ```bash
-python3 scripts/01_preprocess/filter_by_length.py \
+python3 workflow/01_preprocessing/filter_by_length.py \
   data/examples/lig147_synthetic.fa \
   /tmp/SAMPLE_101.fa \
   --target_length 101 \
   --min_input_len 101 \
   --max_input_len 101
 
-python3 scripts/01_preprocess/trim_to_kmer.py \
+python3 workflow/01_preprocessing/trim_to_kmer.py \
   /tmp/SAMPLE_101.fa \
   /tmp/SAMPLE_101.seq \
   --kmer-size 40
@@ -411,7 +452,7 @@ The script keeps reads inside `[--min_input_len, --max_input_len]`, then makes e
 | `--seed` | none | Seeds padding. Omit it for an unseeded draw |
 
 ```bash
-python3 scripts/01_preprocess/filter_by_length.py \
+python3 workflow/01_preprocessing/filter_by_length.py \
   input.fa output_154.fa \
   --target_length 154 \
   --min_input_len 145 \
@@ -437,7 +478,7 @@ A kept read is exactly the target length. lig200 output is 154 bp, which is long
 Run preprocessing separately on a background library and on an enriched (signal) library. SEQ lines must all have length `--seq-length` (default 40). The width check and the `totalautomodelIC` command are written out under [Running steps standalone](#running-steps-standalone).
 
 ```bash
-scripts/02_motif/run_motif.sh \
+workflow/02_motif_discovery/run_motif.sh \
   --background ./processed/BACKGROUND/BACKGROUND_101.seq \
   --signal ./processed/SIGNAL_r4/SIGNAL_r4_101.seq \
   --output-prefix SIGNAL_r4v1 \
@@ -448,7 +489,7 @@ scripts/02_motif/run_motif.sh \
 |-------|---------|
 | `--background` | SEQ from the naïve or input library |
 | `--signal` | SEQ from an enriched round |
-| `spacek40` | shipped at `scripts/02_motif/spacek40` (`--bin-dir` defaults there) |
+| `spacek40` | shipped at `workflow/02_motif_discovery/spacek40` (`--bin-dir` defaults there) |
 
 | Output (in `--work-dir`) | Meaning |
 |--------------------------|---------|
@@ -456,7 +497,7 @@ scripts/02_motif/run_motif.sh \
 | `{prefix}_refined_seeds.tmp.txt` | refined seeds |
 | `{prefix}_refined_model*.tmp.pfm` and matching `.svg` | per-model artefacts from `totalautomodelIC` |
 
-Argument defaults (multinomial `1`, seed length `6`, length cutoff `0.25`, IUPAC cutoff `-`, local-max cutoff `20`, logo number `50`, similarity `0.1`) match the recipe documented in [`docs/motif.md`](docs/motif.md). `totalautomodelIC` itself was not edited.
+Argument defaults (multinomial `1`, seed length `6`, length cutoff `0.25`, IUPAC cutoff `-`, local-max cutoff `20`, logo number `50`, similarity `0.1`) match the recipe documented in [`workflow/02_motif_discovery/motif.md`](workflow/02_motif_discovery/motif.md). `totalautomodelIC` itself was not edited.
 
 #### Simplified command
 
@@ -471,7 +512,7 @@ Argument defaults (multinomial `1`, seed length `6`, length cutoff `0.25`, IUPAC
 Maximum seed length `12` and logo number `100` differ from the `run_motif.sh` defaults (maximum seed `6`, logo number `50`). The other numbers match those defaults.
 
 ```bash
-scripts/02_motif/run_motif.sh --help
+workflow/02_motif_discovery/run_motif.sh --help
 ```
 
 ## Tests
@@ -482,6 +523,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 The tests check that an exact-length read yields one k-mer of the requested width, that the k-mer step drops a short read and writes no random bases by default, that the length filter applies the window and the three trim modes, that `--seed` repeats padding, that a 154 bp filtered read still yields one 40-mer, and that the motif driver rejects a SEQ line of the wrong width before it runs the shipped `spacek40`.
+
+`tests/test_safe_extract.py` covers the length filter, the k-mer extract, and the motif width guard. `tests/test_sample_renaming.py` covers Sanger-ID renaming. See [`tests/README.md`](tests/README.md).
 
 ## License
 

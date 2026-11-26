@@ -1,7 +1,9 @@
 # Preprocessing
 
+Stage overview, process order, inputs, and outputs: [README.md](README.md).
+
 Paths below are relative to the repository root. Scripts live in
-`scripts/01_preprocess/`.
+`workflow/01_preprocessing/`.
 
 This module converts raw paired-end SELEX FASTQ reads into analysis-ready
 fixed-width SEQ files for motif discovery.
@@ -82,7 +84,7 @@ Outputs written under `--output-dir/{SAMPLE}/` (example with lig200 / 154 bp):
 ## Usage
 
 ```bash
-scripts/01_preprocess/run_preprocess.sh \
+workflow/01_preprocessing/run_preprocess.sh \
   --sample SAMPLE \
   --ligand lig200 \
   --seed 1 \
@@ -96,7 +98,7 @@ Provide exactly one of `--ligand` or `--target-length`. The driver has no numeri
 
 ### Running steps standalone
 
-The blocks below are the commands inside `run_preprocess.sh`, in the order it runs them. The [fastp](https://github.com/opengene/fastp) invocation matches that script. `scripts/01_preprocess/run_fastp.sh` runs the same fastp block for one lane: `in1 in2 out_prefix [adapters] [threads]`.
+The blocks below are the commands inside `run_preprocess.sh`, in the order it runs them. The [fastp](https://github.com/opengene/fastp) invocation matches that script. `workflow/01_preprocessing/run_fastp.sh` runs the same fastp block for one lane: `in1 in2 out_prefix [adapters] [threads]`.
 
 Define the fastp variables, then run the block once per lane. `ADAPTER_FASTA` defaults to `config/adapters.fa`. `THREADS` is `nproc`, or 4 when `nproc` is missing. For lane 1 the driver sets `merged`, `json`, and `html` from `processed/SAMPLE/SAMPLE_L1` (lane 2 uses `SAMPLE_L2`).
 
@@ -147,12 +149,12 @@ fastp \
 Same block for lane 2, or:
 
 ```bash
-scripts/01_preprocess/run_fastp.sh \
+workflow/01_preprocessing/run_fastp.sh \
   raw/SAMPLE_L1_R1.fastq.gz \
   raw/SAMPLE_L1_R2.fastq.gz \
   processed/SAMPLE/SAMPLE_L1
 
-scripts/01_preprocess/run_fastp.sh \
+workflow/01_preprocessing/run_fastp.sh \
   raw/SAMPLE_L2_R1.fastq.gz \
   raw/SAMPLE_L2_R2.fastq.gz \
   processed/SAMPLE/SAMPLE_L2
@@ -181,7 +183,7 @@ seqtk seq -a "$COMBINED_FQ" > "$FASTA"
 Length filter. For `--ligand lig200` the driver sets the variables below (other ligands use that design's length and a ±9 bp window). `--seed "$SEED"` is added only when `SEED` is set.
 
 ```bash
-SCRIPT_DIR=scripts/01_preprocess
+SCRIPT_DIR=workflow/01_preprocessing
 FASTA=processed/SAMPLE/SAMPLE.fa
 FASTA_FILTERED=processed/SAMPLE/SAMPLE_154.fa
 TARGET_LEN=154
@@ -227,7 +229,7 @@ python3 "${SCRIPT_DIR}/trim_to_kmer.py" \
 Reads shorter than the minimum or longer than the maximum are dropped. A kept read shorter than the target is padded on the right with random A/T/C/G. A kept read longer than the target is trimmed from the side named by `--trim_from`. `center` drops half of the extra bases from the left (`extra // 2`) and keeps the next `target_length` bases.
 
 ```bash
-python3 scripts/01_preprocess/filter_by_length.py \
+python3 workflow/01_preprocessing/filter_by_length.py \
   input.fa output_154.fa \
   --target_length 154 \
   --min_input_len 145 \
@@ -252,13 +254,13 @@ Stats printed by the script:
 
 ```bash
 # One 40-base window per read (default: start=0). Shorts dropped, no padding.
-python3 scripts/01_preprocess/trim_to_kmer.py input_154.fa output.seq --kmer-size 40
+python3 workflow/01_preprocessing/trim_to_kmer.py input_154.fa output.seq --kmer-size 40
 
 # Centered window
-python3 scripts/01_preprocess/trim_to_kmer.py input_101.fa output.seq --kmer-size 40 --center
+python3 workflow/01_preprocessing/trim_to_kmer.py input_101.fa output.seq --kmer-size 40 --center
 
 # Opt-in short-window padding (seed required)
-python3 scripts/01_preprocess/trim_to_kmer.py input.fa output.seq --kmer-size 40 --allow-pad --seed 1
+python3 workflow/01_preprocessing/trim_to_kmer.py input.fa output.seq --kmer-size 40 --allow-pad --seed 1
 ```
 
 ## `fastp` parameters (current defaults)

@@ -27,12 +27,12 @@ These are example adapters. If you use custom adapters, edit config/adapters.fa 
 
 Run once per lane. Example for lane 1, from the repository root:
 
-  scripts/01_preprocess/run_fastp.sh \
+  workflow/01_preprocessing/run_fastp.sh \
       raw/SAMPLE_L1_R1.fastq.gz \
       raw/SAMPLE_L1_R2.fastq.gz \
       processed/SAMPLE/SAMPLE_L1
 
-  scripts/01_preprocess/run_fastp.sh \
+  workflow/01_preprocessing/run_fastp.sh \
       raw/SAMPLE_L2_R1.fastq.gz \
       raw/SAMPLE_L2_R2.fastq.gz \
       processed/SAMPLE/SAMPLE_L2

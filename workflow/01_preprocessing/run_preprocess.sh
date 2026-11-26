@@ -118,7 +118,7 @@ read. A 154 bp read is long enough for the default 40-mer, so that step
 does not pad.
 
 Example:
-  scripts/01_preprocess/run_preprocess.sh \
+  workflow/01_preprocessing/run_preprocess.sh \
       --sample SAMPLE \
       --ligand lig200 \
       --input-dir ./raw \

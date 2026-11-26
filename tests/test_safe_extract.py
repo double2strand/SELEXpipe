@@ -33,8 +33,8 @@ def load_module(name: str, rel: str):
     return module
 
 
-trim_to_kmer = load_module("trim_to_kmer", "scripts/01_preprocess/trim_to_kmer.py")
-filter_by_length = load_module("filter_by_length", "scripts/01_preprocess/filter_by_length.py")
+trim_to_kmer = load_module("trim_to_kmer", "workflow/01_preprocessing/trim_to_kmer.py")
+filter_by_length = load_module("filter_by_length", "workflow/01_preprocessing/filter_by_length.py")
 
 # Deterministic 101-mer (lig147 merged width). Blocks are unique so a leftover
 # 21-mer cannot appear inside the first 40-mer (the old tile+pad artefact).
@@ -232,7 +232,7 @@ class TestFilterByLength(unittest.TestCase):
                     self.assertEqual(len(expected), 154)
 
     def test_seed_reproducible_via_cli(self) -> None:
-        script = ROOT / "scripts" / "01_preprocess" / "filter_by_length.py"
+        script = ROOT / "workflow" / "01_preprocessing" / "filter_by_length.py"
         original = "A" * 150
 
         def run(seed: str, out_name: str, tmp_path: Path) -> str:
@@ -306,7 +306,7 @@ class TestFilterByLength(unittest.TestCase):
 
 class TestLigandWindowAssumption(unittest.TestCase):
     def test_driver_maps_ligand_lengths_with_nine_bp_window(self) -> None:
-        text = (ROOT / "scripts" / "01_preprocess" / "run_preprocess.sh").read_text(encoding="utf-8")
+        text = (ROOT / "workflow" / "01_preprocessing" / "run_preprocess.sh").read_text(encoding="utf-8")
         self.assertIn("lig147) echo 101", text)
         self.assertIn("lig200) echo 154", text)
         self.assertIn("ligN40) echo 187", text)
@@ -321,7 +321,7 @@ class TestMotifDriverWidthGuard(unittest.TestCase):
         return subprocess.run(
             [
                 "bash",
-                str(ROOT / "scripts" / "02_motif" / "run_motif.sh"),
+                str(ROOT / "workflow" / "02_motif_discovery" / "run_motif.sh"),
                 "--background",
                 str(background),
                 "--signal",
@@ -368,7 +368,7 @@ class TestMotifDriverWidthGuard(unittest.TestCase):
             proc = subprocess.run(
                 [
                     "bash",
-                    str(ROOT / "scripts" / "02_motif" / "run_motif.sh"),
+                    str(ROOT / "workflow" / "02_motif_discovery" / "run_motif.sh"),
                     "--background",
                     str(background),
                     "--signal",
@@ -387,7 +387,7 @@ class TestMotifDriverWidthGuard(unittest.TestCase):
             self.assertNotIn("SEQ is empty", proc.stderr)
             self.assertNotIn("spacek40 binary not found", proc.stderr)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertIn("scripts/02_motif", proc.stdout)
+            self.assertIn("workflow/02_motif_discovery", proc.stdout)
 
 
 if __name__ == "__main__":
