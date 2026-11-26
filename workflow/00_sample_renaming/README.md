@@ -32,7 +32,7 @@ Sample names in this project look like:
 
 The pattern is `C<cycle><ASSAY><ligand length><TF>R<replicate>`. The ligand length is the number inside the assay token (`HTS200`, `NCAP200`), the same `200` that marks that design. Derive each name from the manifest's sample-name field for that Sanger ID. The map does not invent the name from the FASTQ filename.
 
-`examples/example_map.tsv` is a reference map in this shape, including `8030STDY17011914	C1HTS200SOX2R1`. The supplied archive did not match its gzip CRC or the stated sha256 sums (`example_map.tsv` `698b0b75…`, `selex_rename.py` `cbd28151…`). The script here is restored from the recoverable source, with the same control flow. The map keeps the 586 rows that still match a Sanger ID and a `C<cycle>HTS200` or `C<cycle>NCAP200` name. Rows after `8030STDY17012494` in that archive were damaged and are not in the file.
+`examples/example_map.tsv` is a reference map in this shape: 768 rows, 384 `HTS200` and 384 `NCAP200`, including `8030STDY17011914	C1HTS200SOX2R1`.
 
 ## Step 2. Run the renamer
 
@@ -73,16 +73,16 @@ The sample replicate (`R1` in `SOX2R1`) and the sequencing read (`_R1` / `_R2`) 
 
 | Option | Role |
 |--------|------|
-| `--map` | Map file. Required |
-| `--base-dir` | Folder of Sanger-ID directories. Required. Cycle-pattern folders are also searched under it |
-| `--assay-pattern` | Repeatable. Token between the cycle and the TF name. Default `HTS200` and `NCAP200` |
-| `--assay-subdir` / `--no-assay-subdir` | Assay directory. Default on |
-| `--no-recursive-file-rename` | Rename files only in the sample folder, not in subfolders |
-| `--skip-existing` | Skip a clash instead of stopping. The first item in map order, then sorted folder order, keeps the target |
-| `--ids-only` | Only Sanger-ID folders and folders already named by the map. Skip other folders that merely match the cycle pattern |
-| `--dry-run` | Print the plan and change nothing |
+| `--map` | Required. Two columns, TAG and NAME (for example `8030STDY17011914 C1HTS200SOX2R1`) |
+| `--base-dir` | Required. Folder containing the Sanger-ID folders. Cycle-pattern folders under it are searched too |
+| `--assay-pattern` | Middle pattern between the cycle and the sample name. Repeatable. Default `HTS200`, `NCAP200` |
+| `--assay-subdir` / `--no-assay-subdir` | Put outputs under `HTS/` and `NCAP/` so the two assays never collide. Default on |
+| `--no-recursive-file-rename` | Rename files only directly inside each folder, not in sub-folders |
+| `--ids-only` | Only Sanger-ID folders and folders named by the map, not other folders that merely match the cycle pattern |
+| `--skip-existing` | Skip items whose target already exists or clashes instead of aborting |
+| `--dry-run` | Show what would be done without changing anything |
 
-A trailing lowercase `hts` is stripped from the sample name (`MAFG_TDY1c4hts` becomes `MAFG_TDY1c4`). Other characters outside `[A-Za-z0-9._-]` become `_`, runs of `_` collapse, and `_` is stripped from the ends. The name is then parsed as `C<cycle>` + assay pattern + the rest. The folder name is `<TF+replicate>c<cycle>` with the cycle in lower case (`SOX2R1c1`). A name that does not match that pattern is used as-is. Two map rows with the same name get `_2`, `_3`, and so on, in map order.
+A trailing lowercase `hts` is stripped from the sample name (`MAFG_2147c4hts` becomes `MAFG_2147c4`). Other characters outside `[A-Za-z0-9._-]` become `_`, runs of `_` collapse, and `_` is stripped from the ends. The name is then parsed as `C<cycle>` + assay pattern + the rest. The folder name is `<TF+replicate>c<cycle>` with the cycle in lower case (`SOX2R1c1`). A name that does not match that pattern is used as-is. Two map rows with the same name get `_2`, `_3`, and so on, in map order.
 
 Only files named `<TAG>_*.fastq.gz` or `<TAG>_*.fq.gz` are renamed from the Sanger ID, and the tag match is case-insensitive. Other files in the folder move with it and keep their names, unless the name contains the old sample or folder token as its own word, in which case that token is replaced.
 

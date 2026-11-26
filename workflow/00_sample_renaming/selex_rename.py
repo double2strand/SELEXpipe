@@ -5,9 +5,10 @@ selex_rename.py
 One-pass SELEX renamer: Sanger sample-ID folders/FASTQs -> final cycle layout.
 
 Combines the two earlier scripts:
-  1) map renamer    : <base-dir>/<SangerID>  -> sample name from the map
-  2) cycle renamer  : C1HTS200SOX2R1         -> SOX2R1/SOX2R1c1
-so it goes straight from the map IDs to the final layout:
+  1) map renamer    : <base-dir>/8030STDY17011914  -> <base-dir>/C1HTS200SOX2R1
+  2) cycle renamer  : C1HTS200SOX2R1               -> SOX2R1/SOX2R1c1
+so it goes straight from the map IDs to the final, post-reorganization layout:
+
   <base-dir>/8030STDY17011914/8030STDY17011914_L1_R1.fastq.gz
       -> <base-dir>/HTS/SOX2R1/SOX2R1c1/SOX2R1c1_L1_R1.fastq.gz       (default)
       -> <base-dir>/SOX2R1/SOX2R1c1/SOX2R1c1_L1_R1.fastq.gz           (--no-assay-subdir)
@@ -17,12 +18,12 @@ Blank lines and lines starting with '#' are ignored; unparseable lines and
 duplicate tags are warned about and skipped (first occurrence kept).
 
 Name rules (as in the map renamer):
-  * a trailing lowercase 'hts' is stripped   (MAFG_TDY1c4hts -> MAFG_TDY1c4)
+  * a trailing lowercase 'hts' is stripped   (MAFG_2147c4hts -> MAFG_2147c4)
   * characters outside [A-Za-z0-9._-] -> '_', runs of '_' collapsed, '_' stripped
 Then (as in the cycle renamer) the name is parsed as
   ^(c\\d+)_?<ASSAY>_?(.+)$   (case-insensitive; ASSAY from --assay-pattern)
 and the final folder name is <root><cycle> with the cycle lower-cased.
-Names that do not parse (e.g. MAFG_TDY1c4) are used as-is, in place.
+Names that do not parse (e.g. MAFG_2147c4) are used as-is, in place.
 Duplicate names in the map get unique final names in map order (_2, _3, ...).
 
 Placement (cycle renamer's rule, plus the assay level):
@@ -31,7 +32,7 @@ Placement (cycle renamer's rule, plus the assay level):
   * --assay-subdir (default on): parent/<ASSAY>/<root>/<root><cycle>, where ASSAY
     is the assay token without trailing digits (HTS200 -> HTS). An existing HTS/
     or NCAP/ folder (any case) is reused, and nothing is added when the parent
-    is already HTS/ or NCAP/. This matches the HTS/SOX2R1/SOX2R1c1 layout and
+    is already HTS/ or NCAP/. This matches the HTS/ZIC4R2/ZIC4R2c1 layout and
     keeps HTS and NCAP folders of the same sample/cycle from colliding.
 
 Files renamed inside each folder (recursive by default):
@@ -41,8 +42,8 @@ Files renamed inside each folder (recursive by default):
     cycle-renamer input folder) -> that part replaced with the final name
 
 Also still supports trees that are half done: folders already named by the map
-or any folder matching the cycle pattern anywhere under --base-dir, and leftover
-tag-named FASTQs inside an already-final folder.
+(C1HTS200SOX2R1) or any folder matching the cycle pattern anywhere under
+--base-dir, and leftover tag-named FASTQs inside an already-final folder.
 
 Safety: everything is planned and checked before anything is touched (targets
 on disk, two items -> same target, folders blocked by files, file-name clashes).
@@ -90,7 +91,7 @@ def parse_mapping_file(mapping_path: Path) -> list[tuple[str, str]]:
 
 
 def core_name(raw_name: str) -> str:
-    """Strip a trailing lowercase 'hts' (MAFG_TDY1c4hts -> MAFG_TDY1c4)."""
+    """Strip a trailing lowercase 'hts' (MAFG_2147c4hts -> MAFG_2147c4)."""
     return re.sub(r"hts$", "", raw_name)
 
 
@@ -407,8 +408,7 @@ def main() -> None:
                     help="Folder containing the Sanger-ID folders (searched recursively "
                          "for cycle folders).")
     ap.add_argument("--map", dest="map_path", required=True, type=Path,
-                    help="Map file with two columns: TAG NAME "
-                         "(e.g. 8030STDY17011914 C1HTS200SOX2R1).")
+                    help="Map file with two columns: TAG NAME (e.g. 8030STDY17011914 C1HTS200SOX2R1).")
     ap.add_argument("--assay-pattern", action="append", dest="assay_patterns", default=None,
                     help="Middle pattern between cycle and sample name. May be given multiple "
                          f"times. Default: {', '.join(DEFAULT_ASSAY_PATTERNS)}.")
