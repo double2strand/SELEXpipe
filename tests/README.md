@@ -1,5 +1,7 @@
 # Tests
 
+`test_sample_renaming.py` checks Sanger-ID renaming: a dry run leaves the tree alone, a real run builds the assay / TF / cycle paths from a few rows of `workflow/00_sample_renaming/examples/example_map.tsv`, and a flat HT-SELEX plus NCAP-SELEX clash exits 2 with nothing moved.
+
 `test_safe_extract.py` checks the SEQ extract, the length filter, and the motif driver's width guard.
 
 From the repository root, after `python3 -m pip install -r envs/requirements.txt`:
@@ -8,7 +10,7 @@ From the repository root, after `python3 -m pip install -r envs/requirements.txt
 python3 -m unittest discover -s tests -v
 ```
 
-The file covers:
+`test_safe_extract.py` covers:
 
 - an exact-length read yields one SEQ line of the requested width
 - a short read is dropped, and the default output has no random padding
@@ -17,18 +19,4 @@ The file covers:
 - a 154 bp filtered read still yields one 40-mer
 - `run_motif.sh` rejects a SEQ line of the wrong width, and an empty SEQ file, before it runs `spacek40`
 
-## Paths inside the test file
-
-`test_safe_extract.py` was not edited. It still loads and invokes the old locations, and one assertion looks for the string `scripts/02_motif` in the driver log (that log prints the absolute `--bin-dir`). The scripts now live under `workflow/`. Until those references are updated, `unittest` fails while importing the module.
-
-| Line | Reference that still uses the old path |
-|------|----------------------------------------|
-| 36 | `scripts/01_preprocess/trim_to_kmer.py` |
-| 37 | `scripts/01_preprocess/filter_by_length.py` |
-| 235 | `scripts/01_preprocess/filter_by_length.py` |
-| 309 | `scripts/01_preprocess/run_preprocess.sh` |
-| 324 | `scripts/02_motif/run_motif.sh` |
-| 371 | `scripts/02_motif/run_motif.sh` |
-| 390 | stdout must contain `scripts/02_motif` |
-
-`ROOT` is the parent of this directory (`Path(__file__).resolve().parents[1]`), which is still the repository root while this file stays in `tests/`.
+Both test modules load scripts under `workflow/`. `ROOT` is the parent of this directory (`Path(__file__).resolve().parents[1]`), the repository root.

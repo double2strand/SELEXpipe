@@ -4,8 +4,10 @@ SELEX analysis steps that have scripts in this repository. Commands below are ru
 
 ```mermaid
 flowchart TD
+  manifest["Sequencing manifest"]
+  rename["00 Sample renaming"]
   subgraph pre ["01 Preprocessing"]
-    raw["Lane FASTQs"]
+    raw["Renamed lane FASTQs"]
     merge["1 Merge lanes"]
     fq["2 FASTQ to FASTA"]
     filt["3 Length filter"]
@@ -18,13 +20,17 @@ flowchart TD
     logos["Logos, PFMs, seeds"]
     width --> model --> logos
   end
+  manifest --> rename --> raw
   seq --> width
 ```
 
 | Stage | Directory | Driver |
 |-------|-----------|--------|
+| Sample renaming | [00_sample_renaming](00_sample_renaming/README.md) | `selex_rename.py` |
 | Preprocessing | [01_preprocessing](01_preprocessing/README.md) | `run_preprocess.sh` |
 | Motif discovery | [02_motif_discovery](02_motif_discovery/README.md) | `run_motif.sh` |
+
+Sample renaming is first. It turns Sanger run IDs into `HTS` or `NCAP` / TF+replicate / cycle folders. Preprocessing reads the FASTQs in those cycle folders.
 
 A background library and a signal library are two preprocessing runs. Pass the SEQ files to `run_motif.sh` as `--background` and `--signal`.
 

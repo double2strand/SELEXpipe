@@ -56,7 +56,7 @@ workflow/02_motif_discovery/run_motif.sh \
   --work-dir ./motif_out/SIGNAL_r4
 ```
 
-The `--help` text still prints `scripts/02_motif/run_motif.sh` and describes `--bin-dir` as `scripts/02_motif/`. Those strings are inside the script. The command above is the path in this tree.
+The command above is the path in this tree. `--bin-dir` defaults to this directory.
 
 Defaults: multinomial `1`, seed length `6` to `6`, length cutoff `0.25`, IUPAC cutoff `-`, local-max cutoff `20`, logo number `50`, similarity `0.1`. `--all-gaps` passes the length flag as the single argument `-${SEQ_LENGTH}N -allgaps`.
 

@@ -69,6 +69,6 @@ workflow/01_preprocessing/run_fastp.sh \
   processed/SAMPLE/SAMPLE_L2
 ```
 
-`--help` on `run_fastp.sh` still prints `scripts/01_preprocess/run_fastp.sh`. The commands above match this tree.
+The commands above are the paths in this tree.
 
 Next process: [FASTQ to FASTA](../02_fastq_to_fasta/README.md).

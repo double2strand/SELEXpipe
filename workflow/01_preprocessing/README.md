@@ -26,6 +26,8 @@ Turns paired-end HT-SELEX and NCAP-SELEX FASTQs into one fixed-width SEQ line pe
 
 ## Inputs
 
+FASTQs come from [sample renaming](../00_sample_renaming/README.md). A Sanger folder such as `8030STDY17011914/` is now `HTS/SOX2R1/SOX2R1c1/` (assay, TF plus replicate, then cycle). Pass that cycle directory as `--input-dir` and `SOX2R1c1` as `--sample`. The read suffixes are `_R1` and `_R2`. The `R1` inside `SOX2R1` is the replicate from the sample name, not the read.
+
 Four gzipped FASTQs per sample, under `--input-dir`:
 
 | File | Role |
@@ -56,14 +58,12 @@ From the repository root:
 
 ```bash
 workflow/01_preprocessing/run_preprocess.sh \
-  --sample SAMPLE \
+  --sample SOX2R1c1 \
   --ligand lig200 \
-  --input-dir ./raw \
+  --input-dir ./HTS/SOX2R1/SOX2R1c1 \
   --output-dir ./processed
 ```
 
 `--skip-fastp` resumes from the lane-merged gzip files. `--kmer-start` or `--center-kmer` moves the extracted window. `--allow-pad --seed N` pads only a short k-mer window. The length filter pads shorter in-window reads on its own.
-
-The `--help` text still prints `scripts/01_preprocess/run_preprocess.sh`. That example is inside the script and was left as it is. The command above is the path in this tree.
 
 Tools: [fastp](https://github.com/opengene/fastp), seqtk, Python ≥ 3.9, Biopython, bash, gzip, and cat. Install notes: [envs/README.md](../../envs/README.md).

@@ -4,8 +4,9 @@ SELEXpipe is a SELEX sequencing analysis pipeline. It turns
 paired-end HT-SELEX & NCAP-SELEX reads into fixed-width sequence libraries and runs motif
 discovery on those libraries.
 
-Two stages are implemented, under [`workflow/`](workflow/README.md):
+Three stages are implemented, under [`workflow/`](workflow/README.md):
 
+0. **Sample renaming** — build a two-column map from the sequencing manifest and rename Sanger run IDs (for example `8030STDY17011914`) to sample and assay names (`HTS/SOX2R1/SOX2R1c1/...`). This runs before any read processing.
 1. **Preprocessing** — adapter-aware paired-end merge with [fastp](https://github.com/opengene/fastp), a length-window filter that pads or trims reads to a target length, and one k-mer per molecule (default 40 bp). The k-mer step drops a short window unless you pass `--allow-pad` and `--seed`.
 2. **Motif discovery** — `totalautomodelIC` (v0.22) with `workflow/02_motif_discovery/spacek40`. The driver refuses a SEQ file that is empty or whose lines are not all the expected width.
 
@@ -17,8 +18,10 @@ Enrichment filtering beyond length, library reformatting, motif-position matchin
 
 ```mermaid
 flowchart TD
+  manifest["Sequencing manifest"]
+  rename["00 Sample renaming<br/>selex_rename.py"]
   subgraph pre ["01 Preprocessing"]
-    raw["Lane FASTQs<br/>SAMPLE_L1/L2 _R1/R2 .fastq.gz"]
+    raw["Renamed lane FASTQs<br/>SAMPLE_L1/L2 _R1/R2 .fastq.gz"]
     merge["Merge lanes<br/>fastp per lane, then cat"]
     fasta["FASTQ to FASTA<br/>gzip -d -c, seqtk seq -a"]
     filt["Length filter<br/>filter_by_length.py"]
@@ -31,10 +34,11 @@ flowchart TD
     logos["PREFIX_logos.svg<br/>PFMs and seed lists"]
     check --> model --> logos
   end
+  manifest --> rename --> raw
   kmer --> check
 ```
 
-`workflow/01_preprocessing/run_preprocess.sh` runs everything from [fastp](https://github.com/opengene/fastp) through the k-mer extract. `workflow/02_motif_discovery/run_motif.sh` runs motif discovery. Background and signal SEQ files are produced by running preprocessing on each library, then passed in as `--background` and `--signal`.
+`workflow/00_sample_renaming/selex_rename.py` renames Sanger IDs to sample and assay folders before anything else. `workflow/01_preprocessing/run_preprocess.sh` then runs everything from [fastp](https://github.com/opengene/fastp) through the k-mer extract on those renamed FASTQs. `workflow/02_motif_discovery/run_motif.sh` runs motif discovery. Background and signal SEQ files are produced by running preprocessing on each library, then passed in as `--background` and `--signal`.
 
 ## Directory layout
 
@@ -59,6 +63,11 @@ SELEXpipe/
 │   └── test_safe_extract.py                 # k-mer extract, length window, motif width guard
 └── workflow/
     ├── README.md
+    ├── 00_sample_renaming/
+    │   ├── README.md                        # manifest map, then selex_rename.py
+    │   ├── selex_rename.py
+    │   └── examples/
+    │       └── example_map.tsv              # Sanger ID and sample name
     ├── 01_preprocessing/
     │   ├── README.md                        # stage: order, inputs, outputs
     │   ├── preprocessing.md                 # flags, fastp defaults, file names
@@ -80,13 +89,11 @@ SELEXpipe/
         └── totalautomodelIC                # upstream recipe, unmodified
 ```
 
-The `--help` text inside the shell scripts still prints `scripts/01_preprocess/...` and `scripts/02_motif/...`. Those strings were left in the scripts. Invoke the scripts at the paths in this tree. `tests/test_safe_extract.py` still loads the old `scripts/...` paths; see [`tests/README.md`](tests/README.md).
-
 ## Requirements
 
 | Tool | Used by | How to install |
 |------|---------|----------------|
-| Python ≥ 3.9 | length filter, k-mer extract, SEQ width check | conda or system |
+| Python ≥ 3.9 | sample renaming, length filter, k-mer extract, SEQ width check | conda or system |
 | Biopython ≥ 1.81 | `filter_by_length.py` | `envs/requirements.txt` or conda |
 | [fastp](https://github.com/opengene/fastp) | lane merge | [install from the fastp repo](https://github.com/opengene/fastp), or bioconda (`envs/environment.yml`) |
 | seqtk | FASTQ → FASTA | bioconda |
@@ -132,9 +139,22 @@ Pass exactly one of `--ligand` or `--target-length`. There is no numeric default
 
 ## Usage
 
+### Sample renaming
+
+Build a map from the sequencing manifest (`<SangerSampleID>` and `<SampleName>`), then rename the run. Preview with `--dry-run`, then run it again without that flag. Details, the name pattern `C<cycle><ASSAY><ligand length><TF>R<replicate>`, and the exit codes are in [`workflow/00_sample_renaming/README.md`](workflow/00_sample_renaming/README.md).
+
+```bash
+python3 workflow/00_sample_renaming/selex_rename.py \
+  --base-dir ./run \
+  --map workflow/00_sample_renaming/examples/example_map.tsv \
+  --dry-run
+```
+
+`8030STDY17011914_L1_R1.fastq.gz` for `C1HTS200SOX2R1` lands at `HTS/SOX2R1/SOX2R1c1/SOX2R1c1_L1_R1.fastq.gz`. The replicate in `SOX2R1` and the read in `_R1` / `_R2` are different fields. Preprocessing takes its input from that renamed tree.
+
 ### 1. Preprocessing
 
-Inputs under `--input-dir` (four files per sample):
+Inputs are the renamed FASTQs from sample renaming. For `C1HTS200SOX2R1` that directory is `HTS/SOX2R1/SOX2R1c1/` and `--sample` is `SOX2R1c1`. Four files per sample, under `--input-dir`:
 
 | File | Role |
 |------|------|
@@ -504,7 +524,7 @@ python3 -m unittest discover -s tests -v
 
 The tests check that an exact-length read yields one k-mer of the requested width, that the k-mer step drops a short read and writes no random bases by default, that the length filter applies the window and the three trim modes, that `--seed` repeats padding, that a 154 bp filtered read still yields one 40-mer, and that the motif driver rejects a SEQ line of the wrong width before it runs the shipped `spacek40`.
 
-`tests/test_safe_extract.py` still loads `scripts/01_preprocess/` and `scripts/02_motif/`. The test file was not edited, so the command above fails on import until those paths are updated. The lines are listed in [`tests/README.md`](tests/README.md).
+`tests/test_safe_extract.py` covers the length filter, the k-mer extract, and the motif width guard. `tests/test_sample_renaming.py` covers Sanger-ID renaming. See [`tests/README.md`](tests/README.md).
 
 ## License
 

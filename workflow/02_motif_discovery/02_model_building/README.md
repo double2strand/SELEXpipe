@@ -40,6 +40,6 @@ In `--work-dir`:
 | `{prefix}_refined_seeds.tmp.txt` | Refined seeds |
 | `{prefix}_*.tmp.pfm`, `{prefix}_*.tmp.svg`, `{prefix}_*.tmp.txt` | Working files written by `totalautomodelIC` |
 
-`spacek40` stays next to `totalautomodelIC` in the parent directory. `--bin-dir` points the driver at a different copy. The help text still names `scripts/02_motif/`. In this tree the directory is `workflow/02_motif_discovery/`.
+`spacek40` stays next to `totalautomodelIC` in the parent directory. `--bin-dir` points the driver at a different copy. In this tree the directory is `workflow/02_motif_discovery/`.
 
 The full command and a shorter hand-written `totalautomodelIC` example (maximum seed `12`, logo number `100`) are in [motif.md](../motif.md).
